@@ -13,6 +13,26 @@ import time
 COOKIE_DIR = os.path.join(os.path.dirname(__file__), ".linkedin_sessions")
 os.makedirs(COOKIE_DIR, exist_ok=True)
 
+EMPLOYMENT_TYPE_MAP = {
+    "FULL_TIME": "Full-time",
+    "PART_TIME": "Part-time",
+    "CONTRACT": "Contract",
+    "TEMPORARY": "Temporary",
+    "INTERNSHIP": "Internship",
+    "VOLUNTEER": "Volunteer",
+    "OTHER": "Other",
+}
+
+EXPERIENCE_LEVEL_MAP = {
+    "INTERNSHIP": "Internship",
+    "ENTRY_LEVEL": "Entry Level",
+    "ASSOCIATE": "Associate",
+    "MID_SENIOR_LEVEL": "Mid-Senior",
+    "DIRECTOR": "Director",
+    "EXECUTIVE": "Executive",
+    "NOT_APPLICABLE": "",
+}
+
 
 def get_cookie_path(user_id: str) -> str:
     safe = "".join(c if c.isalnum() else "_" for c in user_id)
@@ -73,14 +93,20 @@ def get_api(user_id: str):
 
 def easy_apply(user_id: str, job_id: str, answers: dict = None):
     """Use Playwright to click Easy Apply on a LinkedIn job."""
-    from playwright.sync_api import sync_playwright
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {"ok": False, "error": "Playwright not installed on server"}
 
     cookie_path = get_cookie_path(user_id)
     if not os.path.exists(cookie_path):
         return {"ok": False, "error": "Not logged in"}
 
-    with open(cookie_path, 'rb') as f:
-        cookies_jar = pickle.load(f)
+    try:
+        with open(cookie_path, 'rb') as f:
+            cookies_jar = pickle.load(f)
+    except Exception as e:
+        return {"ok": False, "error": f"Failed to load session: {str(e)}"}
 
     # Convert requests cookies to playwright format
     pw_cookies = []
@@ -92,96 +118,106 @@ def easy_apply(user_id: str, job_id: str, answers: dict = None):
             'path': cookie.path or '/',
         })
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=True, args=['--no-sandbox', '--disable-gpu'])
-        context = browser.new_context(
-            viewport={'width': 1280, 'height': 900},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        )
-        context.add_cookies(pw_cookies)
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True, args=[
+                '--no-sandbox',
+                '--disable-gpu',
+                '--disable-blink-features=AutomationControlled',
+            ])
+            context = browser.new_context(
+                viewport={'width': 1280, 'height': 900},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
+            )
+            context.add_cookies(pw_cookies)
 
-        page = context.new_page()
-        job_url = f'https://www.linkedin.com/jobs/view/{job_id}/'
-        page.goto(job_url, wait_until='domcontentloaded')
-        page.wait_for_timeout(3000)
+            page = context.new_page()
+            job_url = f'https://www.linkedin.com/jobs/view/{job_id}/'
+            page.goto(job_url, wait_until='domcontentloaded')
+            page.wait_for_timeout(3000)
 
-        result = {"ok": False, "error": "Could not find Easy Apply button", "steps": []}
+            result = {"ok": False, "error": "Could not find Easy Apply button", "steps": []}
 
-        try:
-            # Look for Easy Apply button
-            easy_apply_btn = page.locator('button.jobs-apply-button, button[aria-label*="Easy Apply"]').first
-            if easy_apply_btn.is_visible(timeout=5000):
-                result["steps"].append("Found Easy Apply button")
-                easy_apply_btn.click()
-                page.wait_for_timeout(2000)
+            try:
+                # Look for Easy Apply button
+                easy_apply_btn = page.locator('button.jobs-apply-button, button[aria-label*="Easy Apply"]').first
+                if easy_apply_btn.is_visible(timeout=5000):
+                    result["steps"].append("Found Easy Apply button")
+                    easy_apply_btn.click()
+                    page.wait_for_timeout(2000)
 
-                # Handle multi-step application
-                max_steps = 10
-                for step in range(max_steps):
-                    page.wait_for_timeout(1500)
+                    # Handle multi-step application
+                    max_steps = 10
+                    for step in range(max_steps):
+                        page.wait_for_timeout(1500)
 
-                    # Check for submit button
-                    submit_btn = page.locator('button[aria-label="Submit application"], button:has-text("Submit application")').first
-                    if submit_btn.is_visible(timeout=2000):
-                        submit_btn.click()
-                        page.wait_for_timeout(2000)
-                        result = {"ok": True, "message": "Application submitted!", "steps": result["steps"]}
-                        result["steps"].append("Submitted application")
-                        break
+                        # Check for submit button
+                        submit_btn = page.locator('button[aria-label="Submit application"], button:has-text("Submit application")').first
+                        if submit_btn.is_visible(timeout=2000):
+                            submit_btn.click()
+                            page.wait_for_timeout(2000)
+                            result = {"ok": True, "message": "Application submitted!", "steps": result["steps"]}
+                            result["steps"].append("Submitted application")
+                            break
 
-                    # Check for review button
-                    review_btn = page.locator('button[aria-label="Review your application"], button:has-text("Review")').first
-                    if review_btn.is_visible(timeout=1000):
-                        review_btn.click()
-                        result["steps"].append("Clicked Review")
-                        continue
+                        # Check for review button
+                        review_btn = page.locator('button[aria-label="Review your application"], button:has-text("Review")').first
+                        if review_btn.is_visible(timeout=1000):
+                            review_btn.click()
+                            result["steps"].append("Clicked Review")
+                            continue
 
-                    # Check for next button
-                    next_btn = page.locator('button[aria-label="Continue to next step"], button:has-text("Next")').first
-                    if next_btn.is_visible(timeout=1000):
-                        next_btn.click()
-                        result["steps"].append(f"Clicked Next (step {step+1})")
-                        continue
+                        # Check for next button
+                        next_btn = page.locator('button[aria-label="Continue to next step"], button:has-text("Next")').first
+                        if next_btn.is_visible(timeout=1000):
+                            next_btn.click()
+                            result["steps"].append(f"Clicked Next (step {step+1})")
+                            continue
 
-                    # If we're stuck, check for dismiss/close
-                    result["steps"].append(f"Step {step+1}: Waiting for form...")
+                        # If we're stuck, check for dismiss/close
+                        result["steps"].append(f"Step {step+1}: Waiting for form...")
 
-                    # Try to fill any visible text inputs with AI answers
-                    if answers:
-                        text_inputs = page.locator('input[type="text"]:visible, textarea:visible').all()
-                        for inp in text_inputs:
-                            label_text = ""
-                            try:
-                                label_id = inp.get_attribute('id')
-                                if label_id:
-                                    label_el = page.locator(f'label[for="{label_id}"]')
-                                    if label_el.count() > 0:
-                                        label_text = label_el.first.inner_text()
-                            except:
-                                pass
-                            if label_text and label_text in answers:
-                                inp.fill(answers[label_text])
-                                result["steps"].append(f"Filled: {label_text}")
-            else:
-                # Not an Easy Apply job
-                result["error"] = "This job doesn't support Easy Apply. It redirects to the company's website."
+                        # Try to fill any visible text inputs with AI answers
+                        if answers:
+                            text_inputs = page.locator('input[type="text"]:visible, textarea:visible').all()
+                            for inp in text_inputs:
+                                label_text = ""
+                                try:
+                                    label_id = inp.get_attribute('id')
+                                    if label_id:
+                                        label_el = page.locator(f'label[for="{label_id}"]')
+                                        if label_el.count() > 0:
+                                            label_text = label_el.first.inner_text()
+                                except:
+                                    pass
+                                if label_text and label_text in answers:
+                                    inp.fill(answers[label_text])
+                                    result["steps"].append(f"Filled: {label_text}")
+                else:
+                    # Not an Easy Apply job
+                    result["error"] = "This job doesn't support Easy Apply. It redirects to the company's website."
 
-        except Exception as e:
-            result["error"] = str(e)
-            result["steps"].append(f"Error: {str(e)}")
+            except Exception as e:
+                result["error"] = str(e)
+                result["steps"].append(f"Error: {str(e)}")
 
-        # Take a screenshot for debugging
-        try:
-            screenshot_path = os.path.join(COOKIE_DIR, f"apply_{job_id}.png")
-            page.screenshot(path=screenshot_path)
-            result["screenshot"] = screenshot_path
-        except:
-            pass
+            # Take a screenshot for debugging
+            try:
+                screenshot_path = os.path.join(COOKIE_DIR, f"apply_{job_id}.png")
+                page.screenshot(path=screenshot_path)
+                result["screenshot"] = screenshot_path
+            except:
+                pass
 
-        page.wait_for_timeout(2000)
-        browser.close()
+            try:
+                browser.close()
+            except:
+                pass
 
-    return result
+        return result
+
+    except Exception as e:
+        return {"ok": False, "error": f"Playwright error: {str(e)}"}
 
 
 def main():
@@ -280,14 +316,20 @@ def main():
                 for key, val in company_details.items():
                     if isinstance(val, dict):
                         cr = val.get("companyResolutionResult", {})
-                        if isinstance(cr, dict):
-                            company_name = cr.get("name", "")
+                        if isinstance(cr, dict) and cr.get("name"):
+                            company_name = cr["name"]
                             break
+                        if val.get("name"):
+                            company_name = val["name"]
+                            break
+            if not company_name:
+                company_name = job.get("companyName", "") or ""
+            location = job.get("formattedLocation", "") or job.get("locationName", "") or ""
             results.append({
                 "job_id": job_id,
                 "title": job.get("title", ""),
                 "company": company_name,
-                "location": job.get("formattedLocation", ""),
+                "location": location,
                 "listed_at": job.get("listedAt", ""),
                 "work_remote_allowed": job.get("workRemoteAllowed", False),
             })
@@ -306,9 +348,16 @@ def main():
         company_detail = job.get("companyDetails")
         if isinstance(company_detail, dict):
             for key, val in company_detail.items():
-                if isinstance(val, dict) and "name" in val:
-                    company_name = val["name"]
-                    break
+                if isinstance(val, dict):
+                    if val.get("name"):
+                        company_name = val["name"]
+                        break
+                    cr = val.get("companyResolutionResult", {})
+                    if isinstance(cr, dict) and cr.get("name"):
+                        company_name = cr["name"]
+                        break
+        if not company_name:
+            company_name = job.get("companyName", "") or ""
 
         apply_url = ""
         is_easy_apply = False
@@ -320,14 +369,17 @@ def main():
                 if "ComplexOnsiteApply" in key or "SimpleOnsiteApply" in key:
                     is_easy_apply = True
 
+        raw_emp = job.get("employmentType", "") or ""
+        raw_exp = job.get("experienceLevel", "") or ""
+
         result = {
             "job_id": job_id,
             "title": job.get("title", ""),
             "description": desc,
             "company": company_name,
-            "location": job.get("formattedLocation", ""),
-            "employment_type": job.get("employmentType", ""),
-            "experience_level": job.get("experienceLevel", ""),
+            "location": job.get("formattedLocation", "") or job.get("locationName", "") or "",
+            "employment_type": EMPLOYMENT_TYPE_MAP.get(raw_emp, raw_emp.replace("_", " ").title() if raw_emp else ""),
+            "experience_level": EXPERIENCE_LEVEL_MAP.get(raw_exp, raw_exp.replace("_", " ").title() if raw_exp else ""),
             "apply_url": apply_url,
             "is_easy_apply": is_easy_apply,
         }
