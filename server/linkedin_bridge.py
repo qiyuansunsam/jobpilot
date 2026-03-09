@@ -306,7 +306,6 @@ def main():
         # Remove None values from args to avoid API errors
         clean_args = {k: v for k, v in args.items() if v is not None}
         jobs = api.search_jobs(limit=limit, listed_at=listed_at, **clean_args)
-        results = []
         for job in jobs:
             urn = job.get("dashEntityUrn", "") or job.get("entityUrn", "")
             job_id = urn.split(":")[-1] if urn else ""
@@ -360,7 +359,8 @@ def main():
             else:
                 desc = str(desc) if desc else ""
 
-            results.append({
+            # Print each job as a separate JSON line (NDJSON) — flushed immediately
+            print(json.dumps({
                 "job_id": job_id,
                 "title": detail.get("title", "") or job.get("title", ""),
                 "company": company_name,
@@ -371,8 +371,9 @@ def main():
                 "apply_url": apply_url,
                 "workplace": workplace,
                 "description": desc,
-            })
-        print(json.dumps(results, default=str))
+            }, default=str), flush=True)
+        # Signal done
+        print(json.dumps({"done": True}), flush=True)
 
     elif method == "get_job":
         job_id = args["job_id"]

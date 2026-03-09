@@ -95,40 +95,95 @@ export default function LinkedInPage() {
     addChat('system', 'Disconnected from LinkedIn.');
   };
 
+  const searchAbortRef = useRef<AbortController | null>(null);
+
   const handleSearch = async () => {
     if (!keywords && !location) return;
+    // Abort previous search if running
+    if (searchAbortRef.current) searchAbortRef.current.abort();
+    const abort = new AbortController();
+    searchAbortRef.current = abort;
+
     setSearching(true);
     setError('');
     setJobs([]);
+    setJobDetails({});
     setSelectedJob(null);
     addChat('system', `Searching LinkedIn for "${keywords}" in "${location || 'anywhere'}"...`);
+
+    const token = localStorage.getItem('token');
     try {
-      const { data } = await api.post('/linkedin/search', {
-        keywords: keywords || undefined,
-        location_name: location || undefined,
-        remote: remote.length > 0 ? remote : undefined,
-        experience: experience.length > 0 ? experience : undefined,
-        limit: 25,
+      const res = await fetch('/api/linkedin/search', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          keywords: keywords || undefined,
+          location_name: location || undefined,
+          remote: remote.length > 0 ? remote : undefined,
+          experience: experience.length > 0 ? experience : undefined,
+          limit: 25,
+        }),
+        signal: abort.signal,
       });
-      setJobs(data);
-      // Store search results as job details since search now returns full info
-      const details: Record<string, JobDetail> = {};
-      for (const j of data) {
-        details[j.job_id] = j;
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: 'Search failed' }));
+        throw new Error(err.error || 'Search failed');
       }
-      setJobDetails(prev => ({ ...prev, ...details }));
-      addChat('system', `Found **${data.length} jobs**. ${mode === 'auto' ? 'Click Auto Apply to apply to all Easy Apply jobs.' : 'Click a job to view details and generate an application.'}`);
+
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error('No response stream');
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let count = 0;
+      let firstResult = true;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const jsonStr = line.slice(6).trim();
+          if (!jsonStr) continue;
+          try {
+            const obj = JSON.parse(jsonStr);
+            if (obj.done) {
+              addChat('system', `Found **${count} jobs**. ${mode === 'auto' ? 'Click Auto Apply to apply to all Easy Apply jobs.' : 'Click a job to view details.'}`);
+              continue;
+            }
+            if (obj.error) {
+              if (obj.error.includes('expired') || obj.error.includes('Not authenticated')) {
+                setSession({ authenticated: false });
+                addChat('system', 'Session expired. Please reconnect.');
+              } else {
+                setError(obj.error);
+                addChat('system', `Search failed: ${obj.error}`);
+              }
+              continue;
+            }
+            // Got a job — append it
+            count++;
+            setJobs(prev => [...prev, obj]);
+            setJobDetails(prev => ({ ...prev, [obj.job_id]: obj }));
+            if (firstResult) {
+              setSearching(false); // Stop skeleton as soon as first result arrives
+              firstResult = false;
+            }
+          } catch {}
+        }
+      }
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Search failed';
-      setError(msg);
-      if (msg.includes('expired') || msg.includes('Not authenticated')) {
-        setSession({ authenticated: false });
-        addChat('system', `Session expired. Please reconnect to LinkedIn.`);
-      } else {
+      if (err.name !== 'AbortError') {
+        const msg = err.message || 'Search failed';
+        setError(msg);
         addChat('system', `Search failed: ${msg}`);
       }
     } finally {
       setSearching(false);
+      searchAbortRef.current = null;
     }
   };
 

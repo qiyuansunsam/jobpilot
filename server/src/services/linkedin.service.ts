@@ -73,15 +73,73 @@ export async function logoutLinkedIn(userId: number): Promise<void> {
   await runPython('logout', {}, userId);
 }
 
-export async function searchJobs(userId: number, params: {
+export function streamSearchJobs(userId: number, params: {
   keywords?: string;
   location_name?: string;
   experience?: string[];
   job_type?: string[];
   remote?: string[];
   limit?: number;
-}): Promise<any[]> {
-  return runPython('search_jobs', params, userId, 300000); // 5 min — fetches detail for each job
+}, onJob: (job: any) => void, onDone: () => void, onError: (err: Error) => void): () => void {
+  const input = JSON.stringify({
+    method: 'search_jobs',
+    args: params,
+    user_id: String(userId),
+  });
+
+  const proc = spawn('python', ['-u', PYTHON_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+  let buffer = '';
+  let stderr = '';
+
+  const timer = setTimeout(() => {
+    proc.kill();
+    onError(new Error('Search timed out'));
+  }, 300000);
+
+  proc.stdout.on('data', (d) => {
+    buffer += d.toString();
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || ''; // keep incomplete line
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      try {
+        const obj = JSON.parse(line);
+        if (obj.done) {
+          clearTimeout(timer);
+          onDone();
+        } else if (obj.error) {
+          clearTimeout(timer);
+          onError(new Error(obj.error));
+        } else {
+          onJob(obj);
+        }
+      } catch {}
+    }
+  });
+
+  proc.stderr.on('data', (d) => { stderr += d.toString(); });
+
+  proc.on('close', (code) => {
+    clearTimeout(timer);
+    // Process any remaining buffer
+    if (buffer.trim()) {
+      try {
+        const obj = JSON.parse(buffer);
+        if (obj.done) onDone();
+        else if (obj.error) onError(new Error(obj.error));
+        else onJob(obj);
+      } catch {}
+    }
+    if (code !== 0 && stderr) {
+      onError(new Error(stderr.slice(0, 500)));
+    }
+  });
+
+  proc.stdin.write(input);
+  proc.stdin.end();
+
+  // Return kill function
+  return () => { clearTimeout(timer); proc.kill(); };
 }
 
 export async function getJob(userId: number, jobId: string): Promise<any> {
