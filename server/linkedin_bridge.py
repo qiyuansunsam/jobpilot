@@ -310,8 +310,18 @@ def main():
         for job in jobs:
             urn = job.get("dashEntityUrn", "") or job.get("entityUrn", "")
             job_id = urn.split(":")[-1] if urn else ""
+            if not job_id:
+                continue
+
+            # Search results are sparse — fetch detail for each job
+            try:
+                detail = api.get_job(job_id)
+            except Exception:
+                detail = {}
+
+            # Extract company name
             company_name = ""
-            company_details = job.get("companyDetails", {})
+            company_details = detail.get("companyDetails", {})
             if isinstance(company_details, dict):
                 for key, val in company_details.items():
                     if isinstance(val, dict):
@@ -322,18 +332,47 @@ def main():
                         if val.get("name"):
                             company_name = val["name"]
                             break
-            if not company_name:
-                company_name = job.get("companyName", "") or ""
-            location = job.get("formattedLocation", "") or job.get("locationName", "") or ""
+
+            # Extract apply method
+            apply_url = ""
+            is_easy_apply = False
+            apply_method = detail.get("applyMethod", {})
+            if isinstance(apply_method, dict):
+                for key, val in apply_method.items():
+                    if "OffsiteApply" in key and isinstance(val, dict):
+                        apply_url = val.get("companyApplyUrl", "")
+                    if "ComplexOnsiteApply" in key or "SimpleOnsiteApply" in key:
+                        is_easy_apply = True
+
+            # Extract workplace type
+            workplace = ""
+            wt_results = detail.get("workplaceTypesResolutionResults", {})
+            if isinstance(wt_results, dict):
+                for _, wt in wt_results.items():
+                    if isinstance(wt, dict) and wt.get("localizedName"):
+                        workplace = wt["localizedName"]
+                        break
+
+            # Extract description
+            desc = detail.get("description", "")
+            if isinstance(desc, dict):
+                desc = desc.get("text", "")
+            else:
+                desc = str(desc) if desc else ""
+
             results.append({
                 "job_id": job_id,
-                "title": job.get("title", ""),
+                "title": detail.get("title", "") or job.get("title", ""),
                 "company": company_name,
-                "location": location,
-                "listed_at": job.get("listedAt", ""),
-                "work_remote_allowed": job.get("workRemoteAllowed", False),
+                "location": detail.get("formattedLocation", ""),
+                "listed_at": detail.get("listedAt", ""),
+                "work_remote_allowed": detail.get("workRemoteAllowed", False),
+                "is_easy_apply": is_easy_apply,
+                "apply_url": apply_url,
+                "workplace": workplace,
+                "description": desc,
             })
-        print(json.dumps(results))
+        print(json.dumps(results, default=str))
 
     elif method == "get_job":
         job_id = args["job_id"]
@@ -342,22 +381,20 @@ def main():
         if isinstance(desc, dict):
             desc = desc.get("text", "")
         else:
-            desc = str(desc)
+            desc = str(desc) if desc else ""
 
         company_name = ""
         company_detail = job.get("companyDetails")
         if isinstance(company_detail, dict):
             for key, val in company_detail.items():
                 if isinstance(val, dict):
-                    if val.get("name"):
-                        company_name = val["name"]
-                        break
                     cr = val.get("companyResolutionResult", {})
                     if isinstance(cr, dict) and cr.get("name"):
                         company_name = cr["name"]
                         break
-        if not company_name:
-            company_name = job.get("companyName", "") or ""
+                    if val.get("name"):
+                        company_name = val["name"]
+                        break
 
         apply_url = ""
         is_easy_apply = False
@@ -369,19 +406,25 @@ def main():
                 if "ComplexOnsiteApply" in key or "SimpleOnsiteApply" in key:
                     is_easy_apply = True
 
-        raw_emp = job.get("employmentType", "") or ""
-        raw_exp = job.get("experienceLevel", "") or ""
+        workplace = ""
+        wt_results = job.get("workplaceTypesResolutionResults", {})
+        if isinstance(wt_results, dict):
+            for _, wt in wt_results.items():
+                if isinstance(wt, dict) and wt.get("localizedName"):
+                    workplace = wt["localizedName"]
+                    break
 
         result = {
             "job_id": job_id,
             "title": job.get("title", ""),
             "description": desc,
             "company": company_name,
-            "location": job.get("formattedLocation", "") or job.get("locationName", "") or "",
-            "employment_type": EMPLOYMENT_TYPE_MAP.get(raw_emp, raw_emp.replace("_", " ").title() if raw_emp else ""),
-            "experience_level": EXPERIENCE_LEVEL_MAP.get(raw_exp, raw_exp.replace("_", " ").title() if raw_exp else ""),
+            "location": job.get("formattedLocation", ""),
             "apply_url": apply_url,
             "is_easy_apply": is_easy_apply,
+            "workplace": workplace,
+            "work_remote_allowed": job.get("workRemoteAllowed", False),
+            "listed_at": job.get("listedAt", ""),
         }
         print(json.dumps(result, default=str))
 

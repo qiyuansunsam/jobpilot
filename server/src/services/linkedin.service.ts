@@ -81,7 +81,7 @@ export async function searchJobs(userId: number, params: {
   remote?: string[];
   limit?: number;
 }): Promise<any[]> {
-  return runPython('search_jobs', params, userId, 30000);
+  return runPython('search_jobs', params, userId, 300000); // 5 min — fetches detail for each job
 }
 
 export async function getJob(userId: number, jobId: string): Promise<any> {

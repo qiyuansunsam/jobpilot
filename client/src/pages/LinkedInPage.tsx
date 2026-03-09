@@ -3,8 +3,8 @@ import api from '../api/client';
 import { Search, Briefcase, MapPin, Clock, Sparkles, Wifi, WifiOff, LogIn, LogOut, ChevronDown, ChevronUp, ExternalLink, Zap, Globe, Send, Bot, User, Rocket, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Play, Square, FileText } from 'lucide-react';
 
 interface LinkedInSession { authenticated: boolean; name?: string; headline?: string; }
-interface Job { job_id: string; title: string; company: string; location: string; listed_at: number; work_remote_allowed: boolean; }
-interface JobDetail { job_id: string; title: string; description: string; company: string; location: string; employment_type: string; experience_level: string; apply_url: string; is_easy_apply: boolean; }
+interface Job { job_id: string; title: string; company: string; location: string; listed_at: number; work_remote_allowed: boolean; is_easy_apply: boolean; apply_url: string; workplace: string; description: string; }
+interface JobDetail { job_id: string; title: string; description: string; company: string; location: string; apply_url: string; is_easy_apply: boolean; workplace: string; work_remote_allowed: boolean; listed_at: number; }
 interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; timestamp: number; }
 
 export default function LinkedInPage() {
@@ -109,6 +109,12 @@ export default function LinkedInPage() {
         limit: 25,
       });
       setJobs(data);
+      // Store search results as job details since search now returns full info
+      const details: Record<string, JobDetail> = {};
+      for (const j of data) {
+        details[j.job_id] = j;
+      }
+      setJobDetails(prev => ({ ...prev, ...details }));
       addChat('system', `Found **${data.length} jobs**. ${mode === 'auto' ? 'Click Auto Apply to apply to all Easy Apply jobs.' : 'Click a job to view details and generate an application.'}`);
     } catch (err: any) {
       const msg = err.response?.data?.error || 'Search failed';
@@ -124,16 +130,9 @@ export default function LinkedInPage() {
     }
   };
 
-  const loadJobDetail = async (jobId: string) => {
+  const loadJobDetail = (jobId: string) => {
     if (selectedJob === jobId) { setSelectedJob(null); return; }
     setSelectedJob(jobId);
-    if (jobDetails[jobId]) return;
-    setLoadingDetail(jobId);
-    try {
-      const { data } = await api.get(`/linkedin/job/${jobId}`);
-      setJobDetails(prev => ({ ...prev, [jobId]: data }));
-    } catch { setError('Failed to load job details'); }
-    finally { setLoadingDetail(null); }
   };
 
   const generateForJob = async (jobId: string) => {
@@ -170,7 +169,7 @@ export default function LinkedInPage() {
     try {
       const { data } = await api.post('/chat', {
         message: 'Summarize this job posting in 3-4 concise bullet points. Focus on: role responsibilities, key requirements, and any standout details (salary, perks, etc). Be brief.',
-        context: `Job: ${detail.title} at ${detail.company}\nLocation: ${detail.location}\nType: ${detail.employment_type || 'N/A'}\nExperience: ${detail.experience_level || 'N/A'}\n\nDescription:\n${detail.description?.slice(0, 3000)}`,
+        context: `Job: ${detail.title} at ${detail.company}\nLocation: ${detail.location}\nWorkplace: ${detail.workplace || 'N/A'}\n\nDescription:\n${detail.description?.slice(0, 3000)}`,
       });
       setSummaries(prev => ({ ...prev, [jobId]: data.reply }));
     } catch {
@@ -458,10 +457,9 @@ export default function LinkedInPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-medium text-sm text-zinc-100 truncate">{job.title}</h3>
-                        {detail?.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20 shrink-0">Easy Apply</span>}
-                        {detail && !detail.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 shrink-0">External</span>}
-                        {detail?.employment_type && <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800/50 text-zinc-400 rounded border border-zinc-700/30 shrink-0">{detail.employment_type}</span>}
-                        {detail?.experience_level && <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800/50 text-zinc-400 rounded border border-zinc-700/30 shrink-0">{detail.experience_level}</span>}
+                        {job.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20 shrink-0">Easy Apply</span>}
+                        {!job.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 shrink-0">External</span>}
+                        {job.workplace && <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800/50 text-zinc-400 rounded border border-zinc-700/30 shrink-0">{job.workplace}</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-[11px] text-zinc-500">
                         <span className="font-medium text-zinc-400">{job.company || 'Unknown'}</span>
@@ -471,19 +469,21 @@ export default function LinkedInPage() {
                       </div>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0 ml-2">
-                      {mode === 'advanced' && detail && (
+                      {mode === 'advanced' && (
                         <>
-                          <button onClick={(e) => { e.stopPropagation(); generateForJob(job.job_id); }} disabled={generating === job.job_id}
-                            className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-all disabled:opacity-50" title="Generate application">
-                            {generating === job.job_id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
-                          </button>
-                          {detail.is_easy_apply ? (
+                          {detail && (
+                            <button onClick={(e) => { e.stopPropagation(); generateForJob(job.job_id); }} disabled={generating === job.job_id}
+                              className="p-1.5 rounded-lg bg-indigo-500/10 text-indigo-400 hover:bg-indigo-500/20 transition-all disabled:opacity-50" title="Generate application">
+                              {generating === job.job_id ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />}
+                            </button>
+                          )}
+                          {job.is_easy_apply ? (
                             <button onClick={(e) => { e.stopPropagation(); applyToJob(job.job_id); }} disabled={applying === job.job_id}
                               className="p-1.5 rounded-lg bg-emerald-500/10 text-emerald-400 hover:bg-emerald-500/20 transition-all disabled:opacity-50" title="Easy Apply">
                               {applying === job.job_id ? <Loader2 size={12} className="animate-spin" /> : <Send size={12} />}
                             </button>
-                          ) : detail.apply_url ? (
-                            <a href={detail.apply_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
+                          ) : job.apply_url ? (
+                            <a href={job.apply_url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}
                               className="p-1.5 rounded-lg bg-blue-500/10 text-blue-400 hover:bg-blue-500/20 transition-all" title="Apply on website">
                               <ExternalLink size={12} />
                             </a>
@@ -496,21 +496,19 @@ export default function LinkedInPage() {
 
                   {isSelected && (
                     <div className="border-t border-zinc-800/50 p-3 animate-fade-in">
-                      {loadingDetail === job.job_id ? (
-                        <div className="py-6 text-center"><Loader2 size={16} className="animate-spin mx-auto text-indigo-400" /></div>
-                      ) : detail ? (
-                        <div className="space-y-3">
-                          <div className="flex gap-1.5 flex-wrap items-center">
-                            <a href={`https://www.linkedin.com/jobs/view/${job.job_id}`} target="_blank" rel="noreferrer"
+                      <div className="space-y-3">
+                        <div className="flex gap-1.5 flex-wrap items-center">
+                          <a href={`https://www.linkedin.com/jobs/view/${job.job_id}`} target="_blank" rel="noreferrer"
+                            className="flex items-center gap-1 text-[10px] bg-zinc-800/50 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-700/30 hover:border-zinc-600/50 transition-colors">
+                            <ExternalLink size={10} /> LinkedIn
+                          </a>
+                          {job.apply_url && (
+                            <a href={job.apply_url} target="_blank" rel="noreferrer"
                               className="flex items-center gap-1 text-[10px] bg-zinc-800/50 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-700/30 hover:border-zinc-600/50 transition-colors">
-                              <ExternalLink size={10} /> LinkedIn
+                              <ExternalLink size={10} /> Apply on Website
                             </a>
-                            {detail.apply_url && (
-                              <a href={detail.apply_url} target="_blank" rel="noreferrer"
-                                className="flex items-center gap-1 text-[10px] bg-zinc-800/50 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-700/30 hover:border-zinc-600/50 transition-colors">
-                                <ExternalLink size={10} /> Apply on Website
-                              </a>
-                            )}
+                          )}
+                          {job.description && (
                             <button onClick={(e) => { e.stopPropagation(); toggleSummary(job.job_id); }}
                               className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all ml-auto ${
                                 showSummary[job.job_id]
@@ -520,19 +518,19 @@ export default function LinkedInPage() {
                               {summarizing === job.job_id ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
                               AI Summary
                             </button>
-                          </div>
-                          {showSummary[job.job_id] && (
-                            <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed animate-fade-in">
-                              {summarizing === job.job_id ? (
-                                <div className="flex items-center gap-2 text-indigo-400"><Loader2 size={12} className="animate-spin" /> Summarizing with AI...</div>
-                              ) : summaries[job.job_id] || 'No summary available'}
-                            </div>
                           )}
-                          <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-3 text-xs text-zinc-400 whitespace-pre-wrap max-h-[250px] overflow-y-auto leading-relaxed">
-                            {detail.description || 'No description'}
-                          </div>
                         </div>
-                      ) : null}
+                        {showSummary[job.job_id] && (
+                          <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed animate-fade-in">
+                            {summarizing === job.job_id ? (
+                              <div className="flex items-center gap-2 text-indigo-400"><Loader2 size={12} className="animate-spin" /> Summarizing with AI...</div>
+                            ) : summaries[job.job_id] || 'No summary available'}
+                          </div>
+                        )}
+                        <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-3 text-xs text-zinc-400 whitespace-pre-wrap max-h-[250px] overflow-y-auto leading-relaxed">
+                          {job.description || 'No description available for this posting.'}
+                        </div>
+                      </div>
                     </div>
                   )}
                 </div>
