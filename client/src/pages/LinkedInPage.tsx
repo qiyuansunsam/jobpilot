@@ -48,6 +48,7 @@ export default function LinkedInPage() {
   const [applying, setApplying] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const autoStopRef = useRef(false);
+  const autoLimitRef = useRef(autoLimit);
 
   // AI summary toggle per job
   const [summaries, setSummaries] = useState<Record<string, string>>({});
@@ -64,10 +65,12 @@ export default function LinkedInPage() {
   }, []);
 
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
+  useEffect(() => { autoLimitRef.current = autoLimit; }, [autoLimit]);
 
   const addChat = (role: ChatMessage['role'], content: string) => {
     setChatMessages(prev => [...prev, { role, content, timestamp: Date.now() }]);
   };
+
 
   const handleLogin = async () => {
     if (!loginEmail || !loginPassword) { setError('Enter your LinkedIn email and password'); return; }
@@ -95,15 +98,8 @@ export default function LinkedInPage() {
     addChat('system', 'Disconnected from LinkedIn.');
   };
 
-  const searchAbortRef = useRef<AbortController | null>(null);
-
   const handleSearch = async () => {
     if (!keywords && !location) return;
-    // Abort previous search if running
-    if (searchAbortRef.current) searchAbortRef.current.abort();
-    const abort = new AbortController();
-    searchAbortRef.current = abort;
-
     setSearching(true);
     setError('');
     setJobs([]);
@@ -111,79 +107,39 @@ export default function LinkedInPage() {
     setSelectedJob(null);
     addChat('system', `Searching LinkedIn for "${keywords}" in "${location || 'anywhere'}"...`);
 
-    const token = localStorage.getItem('token');
     try {
-      const res = await fetch('/api/linkedin/search', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({
-          keywords: keywords || undefined,
-          location_name: location || undefined,
-          remote: remote.length > 0 ? remote : undefined,
-          experience: experience.length > 0 ? experience : undefined,
-          limit: 25,
-        }),
-        signal: abort.signal,
+      const { data } = await api.post('/linkedin/search', {
+        keywords: keywords || undefined,
+        location_name: location || undefined,
+        remote: remote.length > 0 ? remote : undefined,
+        experience: experience.length > 0 ? experience : undefined,
+        limit: 10,
       });
 
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({ error: 'Search failed' }));
-        throw new Error(err.error || 'Search failed');
-      }
-
-      const reader = res.body?.getReader();
-      if (!reader) throw new Error('No response stream');
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let count = 0;
-      let firstResult = true;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const jsonStr = line.slice(6).trim();
-          if (!jsonStr) continue;
-          try {
-            const obj = JSON.parse(jsonStr);
-            if (obj.done) {
-              addChat('system', `Found **${count} jobs**. ${mode === 'auto' ? 'Click Auto Apply to apply to all Easy Apply jobs.' : 'Click a job to view details.'}`);
-              continue;
-            }
-            if (obj.error) {
-              if (obj.error.includes('expired') || obj.error.includes('Not authenticated')) {
-                setSession({ authenticated: false });
-                addChat('system', 'Session expired. Please reconnect.');
-              } else {
-                setError(obj.error);
-                addChat('system', `Search failed: ${obj.error}`);
-              }
-              continue;
-            }
-            // Got a job — append it
-            count++;
-            setJobs(prev => [...prev, obj]);
-            setJobDetails(prev => ({ ...prev, [obj.job_id]: obj }));
-            if (firstResult) {
-              setSearching(false); // Stop skeleton as soon as first result arrives
-              firstResult = false;
-            }
-          } catch {}
+      if (!data.ok) {
+        const errMsg = data.error || 'Search failed';
+        if (errMsg.includes('expired') || errMsg.includes('Not authenticated')) {
+          setSession({ authenticated: false });
+          addChat('system', 'Session expired. Please reconnect.');
+        } else {
+          setError(errMsg);
+          addChat('system', `Search failed: ${errMsg}`);
         }
+        return;
       }
+
+      const jobList = data.jobs || [];
+      setJobs(jobList);
+      const details: Record<string, any> = {};
+      for (const j of jobList) { details[j.job_id] = j; }
+      setJobDetails(details);
+      addChat('system', `Found **${jobList.length} jobs**. ${mode === 'auto' ? 'Click Auto Apply to apply to all Easy Apply jobs.' : 'Click a job to view details.'}`);
     } catch (err: any) {
-      if (err.name !== 'AbortError') {
-        const msg = err.message || 'Search failed';
-        setError(msg);
-        addChat('system', `Search failed: ${msg}`);
-      }
+      const msg = err.response?.data?.error || err.message || 'Search failed';
+      setError(msg);
+      addChat('system', `Search failed: ${msg}`);
     } finally {
       setSearching(false);
-      searchAbortRef.current = null;
     }
   };
 
@@ -263,15 +219,17 @@ export default function LinkedInPage() {
     setAutoLog([]);
     setAutoApplied(0);
     let appliedCount = 0;
-    addChat('system', `**AUTO MODE**: Processing up to **${autoLimit}** applications from ${jobs.length} jobs...`);
+    const limit = autoLimitRef.current;
+    addChat('system', `**AUTO MODE**: Processing up to **${limit}** applications from ${jobs.length} jobs...`);
 
     for (const job of jobs) {
       if (autoStopRef.current) {
         addChat('system', '**AUTO MODE STOPPED** by user.');
         break;
       }
-      if (appliedCount >= autoLimit) {
-        addChat('system', `**Reached limit of ${autoLimit} applications.** Stopping.`);
+      const currentLimit = autoLimitRef.current;
+      if (appliedCount >= currentLimit) {
+        addChat('system', `**Reached limit of ${currentLimit} applications.** Stopping.`);
         break;
       }
 
@@ -322,13 +280,13 @@ export default function LinkedInPage() {
       if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
 
       // Easy Apply
-      addChat('system', `Applying to **${job.title}** (${appliedCount + 1}/${autoLimit})...`);
+      addChat('system', `Applying to **${job.title}** (${appliedCount + 1}/${autoLimitRef.current})...`);
       try {
         const applyRes = await api.post(`/linkedin/apply/${job.job_id}`, { answers: {} });
         if (applyRes.data.ok) {
           appliedCount++;
           setAutoApplied(appliedCount);
-          const msg = `Applied (${appliedCount}/${autoLimit}): ${job.title} @ ${job.company}`;
+          const msg = `Applied (${appliedCount}/${autoLimitRef.current}): ${job.title} @ ${job.company}`;
           setAutoLog(prev => [...prev, msg]);
           addChat('system', msg);
         } else {
@@ -343,10 +301,10 @@ export default function LinkedInPage() {
       }
     }
 
-    if (!autoStopRef.current && appliedCount < autoLimit) {
+    if (!autoStopRef.current && appliedCount < autoLimitRef.current) {
       addChat('system', `**AUTO MODE COMPLETE.** Applied to **${appliedCount}** jobs. Check Dashboard.`);
-    } else if (appliedCount >= autoLimit) {
-      addChat('system', `**AUTO MODE COMPLETE.** Reached limit: **${appliedCount}/${autoLimit}** applied. Check Dashboard.`);
+    } else if (appliedCount >= autoLimitRef.current) {
+      addChat('system', `**AUTO MODE COMPLETE.** Reached limit: **${appliedCount}/${autoLimitRef.current}** applied. Check Dashboard.`);
     }
     setAutoRunning(false);
   };

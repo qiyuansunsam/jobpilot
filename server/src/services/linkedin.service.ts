@@ -28,7 +28,6 @@ function runPython(method: string, args: Record<string, any>, userId: number, ti
 
     proc.on('close', (code) => {
       clearTimeout(timer!);
-      // Try to parse the LAST JSON line (browser_login prints status then result)
       const lines = stdout.trim().split('\n').filter(Boolean);
       const lastLine = lines[lines.length - 1] || '';
 
@@ -38,7 +37,9 @@ function runPython(method: string, args: Record<string, any>, userId: number, ti
       }
       try {
         const result = JSON.parse(lastLine);
-        if (result.error && !result.ok) {
+        if ('ok' in result || 'authenticated' in result) {
+          resolve(result);
+        } else if (result.error) {
           reject(new Error(result.error));
         } else {
           resolve(result);
@@ -73,73 +74,15 @@ export async function logoutLinkedIn(userId: number): Promise<void> {
   await runPython('logout', {}, userId);
 }
 
-export function streamSearchJobs(userId: number, params: {
+export async function searchJobs(userId: number, params: {
   keywords?: string;
   location_name?: string;
   experience?: string[];
   job_type?: string[];
   remote?: string[];
   limit?: number;
-}, onJob: (job: any) => void, onDone: () => void, onError: (err: Error) => void): () => void {
-  const input = JSON.stringify({
-    method: 'search_jobs',
-    args: params,
-    user_id: String(userId),
-  });
-
-  const proc = spawn('python', ['-u', PYTHON_SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
-  let buffer = '';
-  let stderr = '';
-
-  const timer = setTimeout(() => {
-    proc.kill();
-    onError(new Error('Search timed out'));
-  }, 300000);
-
-  proc.stdout.on('data', (d) => {
-    buffer += d.toString();
-    const lines = buffer.split('\n');
-    buffer = lines.pop() || ''; // keep incomplete line
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try {
-        const obj = JSON.parse(line);
-        if (obj.done) {
-          clearTimeout(timer);
-          onDone();
-        } else if (obj.error) {
-          clearTimeout(timer);
-          onError(new Error(obj.error));
-        } else {
-          onJob(obj);
-        }
-      } catch {}
-    }
-  });
-
-  proc.stderr.on('data', (d) => { stderr += d.toString(); });
-
-  proc.on('close', (code) => {
-    clearTimeout(timer);
-    // Process any remaining buffer
-    if (buffer.trim()) {
-      try {
-        const obj = JSON.parse(buffer);
-        if (obj.done) onDone();
-        else if (obj.error) onError(new Error(obj.error));
-        else onJob(obj);
-      } catch {}
-    }
-    if (code !== 0 && stderr) {
-      onError(new Error(stderr.slice(0, 500)));
-    }
-  });
-
-  proc.stdin.write(input);
-  proc.stdin.end();
-
-  // Return kill function
-  return () => { clearTimeout(timer); proc.kill(); };
+}): Promise<any> {
+  return runPython('search_jobs', params, userId, 300000);
 }
 
 export async function getJob(userId: number, jobId: string): Promise<any> {
@@ -151,5 +94,9 @@ export async function getJobSkills(userId: number, jobId: string): Promise<any> 
 }
 
 export async function easyApply(userId: number, jobId: string, answers?: Record<string, string>): Promise<any> {
-  return runPython('easy_apply', { job_id: jobId, answers: answers || {} }, userId, 120000);
+  try {
+    return await runPython('easy_apply', { job_id: jobId, answers: answers || {} }, userId, 120000);
+  } catch (err: any) {
+    return { ok: false, error: err.message };
+  }
 }

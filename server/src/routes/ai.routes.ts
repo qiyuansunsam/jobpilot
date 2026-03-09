@@ -38,11 +38,12 @@ router.post('/generate', async (req: Request, res: Response) => {
 
     res.json({ application: app, generated: result });
   } catch (err: any) {
+    console.error('[ai/generate]', err.message);
     if (err?.status === 401) {
       res.status(500).json({ error: 'Invalid Anthropic API key' });
       return;
     }
-    throw err;
+    res.status(500).json({ error: err.message || 'AI generation failed' });
   }
 });
 

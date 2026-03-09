@@ -359,22 +359,21 @@ def main():
     if method == "search_jobs":
         limit = args.pop("limit", 25)
         listed_at = args.pop("listed_at", 2592000)  # 30 days default
-        # Remove None values from args to avoid API errors
         clean_args = {k: v for k, v in args.items() if v is not None}
         jobs = api.search_jobs(limit=limit, listed_at=listed_at, **clean_args)
+
+        results = []
         for job in jobs:
             urn = job.get("dashEntityUrn", "") or job.get("entityUrn", "")
             job_id = urn.split(":")[-1] if urn else ""
             if not job_id:
                 continue
 
-            # Search results are sparse — fetch detail for each job
             try:
                 detail = api.get_job(job_id)
             except Exception:
                 detail = {}
 
-            # Extract company name
             company_name = ""
             company_details = detail.get("companyDetails", {})
             if isinstance(company_details, dict):
@@ -388,7 +387,6 @@ def main():
                             company_name = val["name"]
                             break
 
-            # Extract apply method
             apply_url = ""
             is_easy_apply = False
             apply_method = detail.get("applyMethod", {})
@@ -399,7 +397,6 @@ def main():
                     if "ComplexOnsiteApply" in key or "SimpleOnsiteApply" in key:
                         is_easy_apply = True
 
-            # Extract workplace type
             workplace = ""
             wt_results = detail.get("workplaceTypesResolutionResults", {})
             if isinstance(wt_results, dict):
@@ -408,15 +405,13 @@ def main():
                         workplace = wt["localizedName"]
                         break
 
-            # Extract description
             desc = detail.get("description", "")
             if isinstance(desc, dict):
                 desc = desc.get("text", "")
             else:
                 desc = str(desc) if desc else ""
 
-            # Print each job as a separate JSON line (NDJSON) — flushed immediately
-            print(json.dumps({
+            results.append({
                 "job_id": job_id,
                 "title": detail.get("title", "") or job.get("title", ""),
                 "company": company_name,
@@ -427,9 +422,9 @@ def main():
                 "apply_url": apply_url,
                 "workplace": workplace,
                 "description": desc,
-            }, default=str), flush=True)
-        # Signal done
-        print(json.dumps({"done": True}), flush=True)
+            })
+
+        print(json.dumps({"ok": True, "jobs": results}, default=str))
 
     elif method == "get_job":
         job_id = args["job_id"]

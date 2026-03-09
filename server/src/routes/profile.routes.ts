@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
 import { uploadCV } from '../middleware/upload';
 import { profileUpdateSchema } from '../utils/validators';
-import { getProfile, updateAdditionalInfo, updateCV } from '../services/profile.service';
+import { getProfile, updateAdditionalInfo, updateCV, summarizeCV } from '../services/profile.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -37,6 +37,21 @@ router.post('/cv', (req: Request, res: Response) => {
       res.status(500).json({ error: 'Failed to process CV' });
     }
   });
+});
+
+router.get('/summary', async (req: Request, res: Response) => {
+  try {
+    const summary = await summarizeCV(req.user!.userId);
+    if (!summary) {
+      res.json({ error: 'No CV uploaded' });
+      return;
+    }
+    res.json(summary);
+  } catch (e: any) {
+    console.error('[profile/summary]', e.message);
+    // Return empty summary instead of 500 when Claude proxy is down
+    res.json({ error: e.message });
+  }
 });
 
 export default router;

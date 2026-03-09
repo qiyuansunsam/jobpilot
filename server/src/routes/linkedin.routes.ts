@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
-import { credentialLogin, checkSession, logoutLinkedIn, streamSearchJobs, getJob, getJobSkills, easyApply } from '../services/linkedin.service';
+import { credentialLogin, checkSession, logoutLinkedIn, searchJobs, getJob, getJobSkills, easyApply } from '../services/linkedin.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -14,7 +14,6 @@ router.get('/session', async (req: Request, res: Response) => {
   }
 });
 
-// Login with LinkedIn credentials
 router.post('/login', async (req: Request, res: Response) => {
   try {
     const { email, password } = req.body;
@@ -38,32 +37,16 @@ router.post('/logout', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/search', (req: Request, res: Response) => {
-  const { keywords, location_name, experience, job_type, remote, limit } = req.body;
-
-  res.writeHead(200, {
-    'Content-Type': 'text/event-stream',
-    'Cache-Control': 'no-cache',
-    'Connection': 'keep-alive',
-  });
-
-  const kill = streamSearchJobs(
-    req.user!.userId,
-    { keywords, location_name, experience, job_type, remote, limit: limit || 25 },
-    (job) => {
-      res.write(`data: ${JSON.stringify(job)}\n\n`);
-    },
-    () => {
-      res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
-      res.end();
-    },
-    (err) => {
-      res.write(`data: ${JSON.stringify({ error: err.message })}\n\n`);
-      res.end();
-    },
-  );
-
-  req.on('close', () => kill());
+router.post('/search', async (req: Request, res: Response) => {
+  try {
+    const { keywords, location_name, experience, job_type, remote, limit } = req.body;
+    const result = await searchJobs(req.user!.userId, {
+      keywords, location_name, experience, job_type, remote, limit: limit || 10,
+    });
+    res.json(result);
+  } catch (err: any) {
+    res.status(500).json({ ok: false, error: err.message });
+  }
 });
 
 router.get('/job/:id', async (req: Request, res: Response) => {
@@ -84,7 +67,6 @@ router.get('/job/:id/skills', async (req: Request, res: Response) => {
   }
 });
 
-// Easy Apply via Playwright browser automation
 router.post('/apply/:id', async (req: Request, res: Response) => {
   try {
     const { answers } = req.body;

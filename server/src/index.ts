@@ -12,9 +12,13 @@ import applicationsRoutes from './routes/applications.routes';
 import aiRoutes from './routes/ai.routes';
 import linkedinRoutes from './routes/linkedin.routes';
 import chatRoutes from './routes/chat.routes';
+import { startProxy } from './claude-proxy';
 
 // Run migrations
 migrate();
+
+// Start Claude API proxy (for AI features)
+startProxy();
 
 const app = express();
 

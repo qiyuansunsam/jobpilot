@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/client';
-import { Upload, Save, Shield, Check, FileText, Pencil } from 'lucide-react';
+import { Upload, Save, Shield, Check, FileText, Pencil, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function ProfilePage() {
   const [additionalInfo, setAdditionalInfo] = useState('');
@@ -8,6 +8,7 @@ export default function ProfilePage() {
   const [linkedinEmail, setLinkedinEmail] = useState('');
   const [linkedinPass, setLinkedinPass] = useState('');
   const [linkedinConfigured, setLinkedinConfigured] = useState(false);
+  const [showCredForm, setShowCredForm] = useState(false);
   const [saving, setSaving] = useState('');
   const [message, setMessage] = useState('');
 
@@ -131,50 +132,65 @@ export default function ProfilePage() {
 
       {/* LinkedIn Credentials */}
       <section className="glass border border-zinc-800/50 rounded-2xl p-6 animate-fade-in-up transition-all duration-300 hover:border-zinc-700/50" style={{ animationDelay: '200ms' }}>
-        <h2 className="text-base font-semibold mb-2 flex items-center gap-2">
-          <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center border border-blue-500/10">
-            <Shield size={14} className="text-blue-400" />
-          </div>
-          LinkedIn Credentials
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-gradient-to-br from-blue-500/20 to-cyan-500/20 flex items-center justify-center border border-blue-500/10">
+              <Shield size={14} className="text-blue-400" />
+            </div>
+            LinkedIn Credentials
+            {linkedinConfigured && (
+              <span className="ml-2 flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                <Check size={10} /> Connected
+              </span>
+            )}
+          </h2>
           {linkedinConfigured && (
-            <span className="ml-2 flex items-center gap-1 text-[10px] text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-              <Check size={10} /> Connected
-            </span>
+            <button
+              onClick={() => setShowCredForm(!showCredForm)}
+              className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-300 transition-colors"
+            >
+              {showCredForm ? <><ChevronUp size={12} /> Hide</> : <><ChevronDown size={12} /> Change Credentials</>}
+            </button>
           )}
-        </h2>
-        <p className="text-xs text-zinc-600 mb-4 ml-10">
-          Encrypted with AES-256-GCM. Used for LinkedIn job search & automation.
-        </p>
-        <div className="space-y-3">
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Email</label>
-            <input
-              type="email"
-              value={linkedinEmail}
-              onChange={(e) => setLinkedinEmail(e.target.value)}
-              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all duration-200 placeholder:text-zinc-700"
-              placeholder="your@email.com"
-            />
-          </div>
-          <div>
-            <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Password</label>
-            <input
-              type="password"
-              value={linkedinPass}
-              onChange={(e) => setLinkedinPass(e.target.value)}
-              placeholder={linkedinConfigured ? 'Enter new password to update' : 'LinkedIn password'}
-              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all duration-200 placeholder:text-zinc-700"
-            />
-          </div>
-          <button
-            onClick={saveLinkedIn}
-            disabled={saving === 'linkedin'}
-            className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-50 shadow-[0_0_12px_rgba(59,130,246,0.15)]"
-          >
-            <Save size={14} />
-            {saving === 'linkedin' ? 'Saving...' : 'Save Credentials'}
-          </button>
         </div>
+
+        {(!linkedinConfigured || showCredForm) && (
+          <div className="mt-4 animate-fade-in">
+            <p className="text-xs text-zinc-600 mb-4 ml-10">
+              Encrypted with AES-256-GCM. Used for LinkedIn job search & automation.
+            </p>
+            <div className="space-y-3">
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Email</label>
+                <input
+                  type="email"
+                  value={linkedinEmail}
+                  onChange={(e) => setLinkedinEmail(e.target.value)}
+                  className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all duration-200 placeholder:text-zinc-700"
+                  placeholder="your@email.com"
+                />
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 uppercase tracking-wider mb-1">Password</label>
+                <input
+                  type="password"
+                  value={linkedinPass}
+                  onChange={(e) => setLinkedinPass(e.target.value)}
+                  placeholder={linkedinConfigured ? 'Enter new password to update' : 'LinkedIn password'}
+                  className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500/50 transition-all duration-200 placeholder:text-zinc-700"
+                />
+              </div>
+              <button
+                onClick={saveLinkedIn}
+                disabled={saving === 'linkedin'}
+                className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-5 py-2.5 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-50 shadow-[0_0_12px_rgba(59,130,246,0.15)]"
+              >
+                <Save size={14} />
+                {saving === 'linkedin' ? 'Saving...' : linkedinConfigured ? 'Update Credentials' : 'Save Credentials'}
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </div>
   );
