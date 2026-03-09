@@ -1,5 +1,6 @@
 import express from 'express';
 import cors from 'cors';
+import path from 'path';
 import { config } from './config';
 import { migrate } from './db/connection';
 import { errorHandler } from './middleware/errorHandler';
@@ -17,7 +18,10 @@ migrate();
 
 const app = express();
 
-app.use(cors({ origin: 'http://localhost:5173' }));
+app.use(cors({ origin: [
+  'http://localhost:5173',
+  /\.ngrok-free\.app$/,
+] }));
 app.use(express.json({ limit: '10mb' }));
 
 // Routes
@@ -32,6 +36,13 @@ app.use('/api/chat', chatRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+
+// Serve built client in production
+const clientDist = path.join(__dirname, '../../client/dist');
+app.use(express.static(clientDist));
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(clientDist, 'index.html'));
+});
 
 // Error handler
 app.use(errorHandler);

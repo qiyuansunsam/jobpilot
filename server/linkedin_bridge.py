@@ -226,10 +226,23 @@ def main():
                 print(json.dumps({"authenticated": False}))
                 return
             profile = api.get_user_profile()
+            # Detect 401/expired session
+            if isinstance(profile, dict) and profile.get("status") in (401, 403):
+                if os.path.exists(cookie_path):
+                    os.remove(cookie_path)
+                print(json.dumps({"authenticated": False}))
+                return
             mini = profile.get("miniProfile", {})
+            name = f"{mini.get('firstName', '')} {mini.get('lastName', '')}".strip()
+            if not name:
+                # If we can't get a name, session might be invalid
+                if os.path.exists(cookie_path):
+                    os.remove(cookie_path)
+                print(json.dumps({"authenticated": False}))
+                return
             print(json.dumps({
                 "authenticated": True,
-                "name": f"{mini.get('firstName', '')} {mini.get('lastName', '')}".strip(),
+                "name": name,
                 "headline": mini.get("occupation", ""),
             }))
         except Exception:
@@ -258,10 +271,21 @@ def main():
         print(json.dumps({"error": "Not authenticated. Please login via browser first."}))
         sys.exit(1)
 
+    # Quick session validity check
+    profile_check = api.get_user_profile()
+    if isinstance(profile_check, dict) and profile_check.get("status") in (401, 403):
+        cookie_path = get_cookie_path(user_id)
+        if os.path.exists(cookie_path):
+            os.remove(cookie_path)
+        print(json.dumps({"error": "Session expired. Please login again."}))
+        sys.exit(1)
+
     if method == "search_jobs":
         limit = args.pop("limit", 25)
         listed_at = args.pop("listed_at", 2592000)  # 30 days default
-        jobs = api.search_jobs(limit=limit, listed_at=listed_at, **args)
+        # Remove None values from args to avoid API errors
+        clean_args = {k: v for k, v in args.items() if v is not None}
+        jobs = api.search_jobs(limit=limit, listed_at=listed_at, **clean_args)
         results = []
         for job in jobs:
             urn = job.get("dashEntityUrn", "") or job.get("entityUrn", "")
