@@ -33,6 +33,8 @@ export default function LinkedInPage() {
   // Auto mode state
   const [autoRunning, setAutoRunning] = useState(false);
   const [autoLog, setAutoLog] = useState<string[]>([]);
+  const [autoLimit, setAutoLimit] = useState(5);
+  const [autoApplied, setAutoApplied] = useState(0);
 
   // Chat
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
@@ -204,11 +206,17 @@ export default function LinkedInPage() {
     autoStopRef.current = false;
     setAutoRunning(true);
     setAutoLog([]);
-    addChat('system', `**AUTO MODE**: Processing ${jobs.length} jobs...`);
+    setAutoApplied(0);
+    let appliedCount = 0;
+    addChat('system', `**AUTO MODE**: Processing up to **${autoLimit}** applications from ${jobs.length} jobs...`);
 
     for (const job of jobs) {
       if (autoStopRef.current) {
         addChat('system', '**AUTO MODE STOPPED** by user.');
+        break;
+      }
+      if (appliedCount >= autoLimit) {
+        addChat('system', `**Reached limit of ${autoLimit} applications.** Stopping.`);
         break;
       }
 
@@ -259,14 +267,20 @@ export default function LinkedInPage() {
       if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
 
       // Easy Apply
-      addChat('system', `Applying to **${job.title}**...`);
+      addChat('system', `Applying to **${job.title}** (${appliedCount + 1}/${autoLimit})...`);
       try {
         const applyRes = await api.post(`/linkedin/apply/${job.job_id}`, { answers: {} });
-        const msg = applyRes.data.ok
-          ? `Applied: ${job.title} @ ${job.company}`
-          : `Failed: ${job.title} — ${applyRes.data.error}`;
-        setAutoLog(prev => [...prev, msg]);
-        addChat('system', msg);
+        if (applyRes.data.ok) {
+          appliedCount++;
+          setAutoApplied(appliedCount);
+          const msg = `Applied (${appliedCount}/${autoLimit}): ${job.title} @ ${job.company}`;
+          setAutoLog(prev => [...prev, msg]);
+          addChat('system', msg);
+        } else {
+          const msg = `Failed: ${job.title} — ${applyRes.data.error}`;
+          setAutoLog(prev => [...prev, msg]);
+          addChat('system', msg);
+        }
       } catch (err: any) {
         const msg = `Apply error: ${job.title} — ${err.response?.data?.error || err.message || 'Unknown'}`;
         setAutoLog(prev => [...prev, msg]);
@@ -274,8 +288,10 @@ export default function LinkedInPage() {
       }
     }
 
-    if (!autoStopRef.current) {
-      addChat('system', '**AUTO MODE COMPLETE.** Check Dashboard for all applications.');
+    if (!autoStopRef.current && appliedCount < autoLimit) {
+      addChat('system', `**AUTO MODE COMPLETE.** Applied to **${appliedCount}** jobs. Check Dashboard.`);
+    } else if (appliedCount >= autoLimit) {
+      addChat('system', `**AUTO MODE COMPLETE.** Reached limit: **${appliedCount}/${autoLimit}** applied. Check Dashboard.`);
     }
     setAutoRunning(false);
   };
@@ -363,6 +379,18 @@ export default function LinkedInPage() {
           </div>
           {/* Mode buttons */}
           <div className="flex items-center gap-2">
+            {!autoRunning && (
+              <div className="flex items-center gap-1 bg-zinc-900/50 border border-zinc-800 rounded-xl px-2 py-1">
+                <button onClick={() => setAutoLimit(Math.max(1, autoLimit - 1))} className="text-zinc-500 hover:text-zinc-300 text-xs px-1">-</button>
+                <span className="text-xs text-zinc-300 min-w-[2ch] text-center">{autoLimit}</span>
+                <button onClick={() => setAutoLimit(autoLimit + 1)} className="text-zinc-500 hover:text-zinc-300 text-xs px-1">+</button>
+              </div>
+            )}
+            {autoRunning && (
+              <span className="text-[10px] text-amber-400 bg-amber-500/10 px-2 py-1 rounded-lg border border-amber-500/20">
+                {autoApplied}/{autoLimit}
+              </span>
+            )}
             <button onClick={() => {
               if (autoRunning) {
                 stopAutoMode();

@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import api from '../api/client';
-import { Sparkles, ExternalLink, ChevronDown, ChevronUp, Briefcase, Send, MessageSquare, XCircle } from 'lucide-react';
+import { Sparkles, ExternalLink, ChevronDown, ChevronUp, Briefcase, Send, MessageSquare, XCircle, User, FileText, MapPin } from 'lucide-react';
 
 interface Application {
   id: number;
@@ -12,6 +12,18 @@ interface Application {
   generated_cover: string | null;
   generated_answers: string | null;
   created_at: string;
+}
+
+interface UserProfile {
+  cv_filename: string | null;
+  cv_text: string | null;
+  additional_info: string | null;
+}
+
+interface Preferences {
+  job_titles: string | null;
+  locations: string | null;
+  experience: string | null;
 }
 
 const statusConfig: Record<string, { color: string; icon: typeof Briefcase; glow: string }> = {
@@ -25,12 +37,20 @@ export default function DashboardPage() {
   const [apps, setApps] = useState<Application[]>([]);
   const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<number | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [prefs, setPrefs] = useState<Preferences | null>(null);
 
   useEffect(() => {
-    api.get('/applications').then(({ data }) => {
-      setApps(data);
+    Promise.all([
+      api.get('/applications'),
+      api.get('/profile'),
+      api.get('/preferences'),
+    ]).then(([appsRes, profileRes, prefsRes]) => {
+      setApps(appsRes.data);
+      setProfile(profileRes.data);
+      setPrefs(prefsRes.data);
       setLoading(false);
-    });
+    }).catch(() => setLoading(false));
   }, []);
 
   const updateStatus = async (id: number, status: string) => {
@@ -55,6 +75,43 @@ export default function DashboardPage() {
           New Application
         </Link>
       </div>
+
+      {/* Profile card */}
+      {profile && (
+        <div className="glass border border-zinc-800/50 rounded-2xl p-5 mb-6 animate-fade-in-up">
+          <div className="flex items-start gap-4">
+            <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center border border-indigo-500/10 shrink-0">
+              <User size={20} className="text-indigo-400" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2 flex-wrap">
+                {profile.cv_filename && (
+                  <span className="text-[10px] px-2 py-0.5 bg-emerald-500/10 text-emerald-400 rounded-full border border-emerald-500/20 flex items-center gap-1">
+                    <FileText size={9} /> {profile.cv_filename}
+                  </span>
+                )}
+                {prefs?.experience && (
+                  <span className="text-[10px] px-2 py-0.5 bg-zinc-800/50 text-zinc-400 rounded-full border border-zinc-700/30">{prefs.experience}</span>
+                )}
+              </div>
+              <div className="flex items-center gap-3 mt-2 text-xs text-zinc-500 flex-wrap">
+                {prefs?.job_titles && (() => {
+                  try { const titles = JSON.parse(prefs.job_titles); return titles.length > 0 ? <span className="flex items-center gap-1"><Briefcase size={10} />{titles.join(', ')}</span> : null; } catch { return null; }
+                })()}
+                {prefs?.locations && (() => {
+                  try { const locs = JSON.parse(prefs.locations); return locs.length > 0 ? <span className="flex items-center gap-1"><MapPin size={10} />{locs.join(', ')}</span> : null; } catch { return null; }
+                })()}
+              </div>
+              {profile.additional_info && (
+                <p className="text-[11px] text-zinc-600 mt-2 line-clamp-2">{profile.additional_info}</p>
+              )}
+              {!profile.cv_filename && (
+                <Link to="/profile" className="text-[11px] text-indigo-400 hover:text-indigo-300 mt-1 inline-block">Upload your CV to get started →</Link>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-4 mb-8 stagger-children">
