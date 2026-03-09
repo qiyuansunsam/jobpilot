@@ -53,9 +53,9 @@ function runPython(method: string, args: Record<string, any>, userId: number, ti
   });
 }
 
-export async function browserLogin(userId: number): Promise<{ ok: boolean; name?: string; error?: string }> {
+export async function credentialLogin(userId: number, email: string, password: string): Promise<{ ok: boolean; name?: string; headline?: string; error?: string }> {
   try {
-    return await runPython('browser_login', {}, userId, 150000); // 2.5 min timeout for manual login
+    return await runPython('credential_login', { email, password }, userId, 60000);
   } catch (err: any) {
     return { ok: false, error: err.message };
   }

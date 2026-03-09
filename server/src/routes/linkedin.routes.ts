@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
-import { browserLogin, checkSession, logoutLinkedIn, searchJobs, getJob, getJobSkills, easyApply } from '../services/linkedin.service';
+import { credentialLogin, checkSession, logoutLinkedIn, searchJobs, getJob, getJobSkills, easyApply } from '../services/linkedin.service';
 
 const router = Router();
 router.use(authMiddleware);
@@ -14,10 +14,15 @@ router.get('/session', async (req: Request, res: Response) => {
   }
 });
 
-// Opens a real browser window for LinkedIn login
+// Login with LinkedIn credentials
 router.post('/login', async (req: Request, res: Response) => {
   try {
-    const result = await browserLogin(req.user!.userId);
+    const { email, password } = req.body;
+    if (!email || !password) {
+      res.status(400).json({ ok: false, error: 'Email and password are required' });
+      return;
+    }
+    const result = await credentialLogin(req.user!.userId, email, password);
     res.json(result);
   } catch (err: any) {
     res.status(500).json({ ok: false, error: err.message });

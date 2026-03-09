@@ -11,6 +11,8 @@ export default function LinkedInPage() {
   const [session, setSession] = useState<LinkedInSession>({ authenticated: false });
   const [checkingSession, setCheckingSession] = useState(true);
   const [loggingIn, setLoggingIn] = useState(false);
+  const [loginEmail, setLoginEmail] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
 
   // Search
   const [keywords, setKeywords] = useState('');
@@ -66,22 +68,20 @@ export default function LinkedInPage() {
   };
 
   const handleLogin = async () => {
+    if (!loginEmail || !loginPassword) { setError('Enter your LinkedIn email and password'); return; }
     setLoggingIn(true);
     setError('');
-    addChat('system', 'Opening LinkedIn login window... Please sign in.');
     try {
-      const { data } = await api.post('/linkedin/login');
+      const { data } = await api.post('/linkedin/login', { email: loginEmail, password: loginPassword });
       if (data.ok) {
         setSession({ authenticated: true, name: data.name, headline: data.headline });
+        setLoginPassword('');
         addChat('system', `Connected as **${data.name}**! Ready to search jobs.`);
       } else {
         setError(data.error || 'Login failed');
-        addChat('system', `Login failed: ${data.error}`);
       }
     } catch (err: any) {
-      const msg = err.response?.data?.error || 'Login failed';
-      setError(msg);
-      addChat('system', `Login error: ${msg}`);
+      setError(err.response?.data?.error || 'Login failed');
     } finally {
       setLoggingIn(false);
     }
@@ -324,12 +324,22 @@ export default function LinkedInPage() {
             <Briefcase size={32} className="text-white" />
           </div>
           <h2 className="text-xl font-bold mb-2">Connect LinkedIn</h2>
-          <p className="text-zinc-500 text-sm mb-8 leading-relaxed">
-            A browser window will open for you to sign in to LinkedIn securely.
+          <p className="text-zinc-500 text-sm mb-6 leading-relaxed">
+            Sign in with your LinkedIn credentials to get started.
           </p>
+          <div className="space-y-3 mb-6 text-left">
+            <input type="email" value={loginEmail} onChange={e => setLoginEmail(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              placeholder="LinkedIn email"
+              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600" />
+            <input type="password" value={loginPassword} onChange={e => setLoginPassword(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && handleLogin()}
+              placeholder="Password"
+              className="w-full bg-zinc-900/50 border border-zinc-800 rounded-xl px-4 py-3 text-zinc-100 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-600" />
+          </div>
           <button onClick={handleLogin} disabled={loggingIn}
-            className="group inline-flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-8 py-3 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-50 shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:shadow-[0_0_30px_rgba(59,130,246,0.4)]">
-            {loggingIn ? <><Loader2 size={16} className="animate-spin" /> Opening browser...</> : <><LogIn size={16} /> Sign in with LinkedIn</>}
+            className="group w-full inline-flex items-center justify-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white px-8 py-3 rounded-xl text-sm font-medium transition-all duration-300 disabled:opacity-50 shadow-[0_0_20px_rgba(59,130,246,0.2)] hover:shadow-[0_0_30px_rgba(59,130,246,0.4)]">
+            {loggingIn ? <><Loader2 size={16} className="animate-spin" /> Signing in...</> : <><LogIn size={16} /> Sign in</>}
           </button>
           {error && <p className="text-red-400 text-xs mt-4">{error}</p>}
         </div>

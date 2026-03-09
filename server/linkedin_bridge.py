@@ -19,60 +19,42 @@ def get_cookie_path(user_id: str) -> str:
     return os.path.join(COOKIE_DIR, f"{safe}.pkl")
 
 
-def browser_login(user_id: str):
-    """Open a real browser window for LinkedIn login, wait for user to complete, capture cookies."""
-    from playwright.sync_api import sync_playwright
+def credential_login(user_id: str, email: str, password: str):
+    """Login to LinkedIn using email/password credentials (works remotely)."""
+    from linkedin_api import Linkedin
+    import requests
 
     cookie_path = get_cookie_path(user_id)
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, args=['--start-maximized'])
-        context = browser.new_context(
-            viewport={'width': 1280, 'height': 900},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'
-        )
-        page = context.new_page()
-        page.goto('https://www.linkedin.com/login')
+    try:
+        api = Linkedin(email, password)
+        # Save the session cookies
+        if hasattr(api, 'client') and hasattr(api.client, 'session'):
+            jar = api.client.session.cookies
+        else:
+            return {"ok": False, "error": "Could not extract session cookies"}
 
-        # Wait for user to login — detect by checking for feed page or li_at cookie
-        print(json.dumps({"status": "waiting", "message": "Browser opened. Please log in to LinkedIn..."}), flush=True)
+        with open(cookie_path, 'wb') as f:
+            pickle.dump(jar, f)
 
-        # Poll for login completion (max 120 seconds)
-        for _ in range(240):
-            time.sleep(0.5)
-            cookies = context.cookies()
-            li_at = next((c for c in cookies if c['name'] == 'li_at'), None)
-            if li_at:
-                # Got the auth cookie — save all cookies
-                import requests
-                jar = requests.cookies.RequestsCookieJar()
-                for c in cookies:
-                    if c['domain'].endswith('linkedin.com'):
-                        jar.set(c['name'], c['value'], domain=c['domain'], path=c.get('path', '/'))
-                with open(cookie_path, 'wb') as f:
-                    pickle.dump(jar, f)
+        # Get profile name
+        try:
+            profile = api.get_user_profile()
+            mini = profile.get('miniProfile', {})
+            name = f"{mini.get('firstName', '')} {mini.get('lastName', '')}".strip()
+            headline = mini.get("occupation", "")
+        except Exception:
+            name = "LinkedIn User"
+            headline = ""
 
-                # Get profile name
-                try:
-                    from linkedin_api import Linkedin
-                    api = Linkedin('', '', cookies=jar)
-                    profile = api.get_user_profile()
-                    mini = profile.get('miniProfile', {})
-                    name = f"{mini.get('firstName', '')} {mini.get('lastName', '')}".strip()
-                except Exception:
-                    name = "LinkedIn User"
-
-                browser.close()
-                return {"ok": True, "name": name}
-
-            # Check if page navigated away from login
-            url = page.url
-            if '/feed' in url or '/mynetwork' in url or '/jobs' in url:
-                time.sleep(2)  # Give cookies a moment to settle
-                continue
-
-        browser.close()
-        return {"ok": False, "error": "Login timed out (2 minutes). Please try again."}
+        return {"ok": True, "name": name or "LinkedIn User", "headline": headline}
+    except Exception as e:
+        err_str = str(e).lower()
+        if "challenge" in err_str or "captcha" in err_str or "verification" in err_str:
+            return {"ok": False, "error": "LinkedIn requires verification. Try again or use a different network."}
+        if "bad credentials" in err_str or "401" in err_str or "incorrect" in err_str:
+            return {"ok": False, "error": "Incorrect email or password."}
+        return {"ok": False, "error": f"Login failed: {str(e)}"}
 
 
 def get_api(user_id: str):
@@ -210,8 +192,10 @@ def main():
     args = req.get("args", {})
     user_id = req.get("user_id", "default")
 
-    if method == "browser_login":
-        result = browser_login(user_id)
+    if method == "credential_login":
+        email = args.get("email", "")
+        password = args.get("password", "")
+        result = credential_login(user_id, email, password)
         print(json.dumps(result))
         return
 
