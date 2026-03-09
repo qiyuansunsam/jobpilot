@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../api/client';
-import { Search, Briefcase, MapPin, Clock, Sparkles, Wifi, WifiOff, LogIn, LogOut, ChevronDown, ChevronUp, ExternalLink, Zap, Globe, Send, Bot, User, Rocket, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Play, Square } from 'lucide-react';
+import { Search, Briefcase, MapPin, Clock, Sparkles, Wifi, WifiOff, LogIn, LogOut, ChevronDown, ChevronUp, ExternalLink, Zap, Globe, Send, Bot, User, Rocket, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Play, Square, FileText } from 'lucide-react';
 
 interface LinkedInSession { authenticated: boolean; name?: string; headline?: string; }
 interface Job { job_id: string; title: string; company: string; location: string; listed_at: number; work_remote_allowed: boolean; }
@@ -44,6 +44,11 @@ export default function LinkedInPage() {
   const [applying, setApplying] = useState<string | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const autoStopRef = useRef(false);
+
+  // AI summary toggle per job
+  const [summaries, setSummaries] = useState<Record<string, string>>({});
+  const [summarizing, setSummarizing] = useState<string | null>(null);
+  const [showSummary, setShowSummary] = useState<Record<string, boolean>>({});
 
   const [error, setError] = useState('');
 
@@ -152,6 +157,27 @@ export default function LinkedInPage() {
     } finally { setGenerating(null); }
   };
 
+  const toggleSummary = async (jobId: string) => {
+    if (showSummary[jobId]) {
+      setShowSummary(prev => ({ ...prev, [jobId]: false }));
+      return;
+    }
+    setShowSummary(prev => ({ ...prev, [jobId]: true }));
+    if (summaries[jobId]) return;
+    const detail = jobDetails[jobId];
+    if (!detail) return;
+    setSummarizing(jobId);
+    try {
+      const { data } = await api.post('/chat', {
+        message: 'Summarize this job posting in 3-4 concise bullet points. Focus on: role responsibilities, key requirements, and any standout details (salary, perks, etc). Be brief.',
+        context: `Job: ${detail.title} at ${detail.company}\nLocation: ${detail.location}\nType: ${detail.employment_type || 'N/A'}\nExperience: ${detail.experience_level || 'N/A'}\n\nDescription:\n${detail.description?.slice(0, 3000)}`,
+      });
+      setSummaries(prev => ({ ...prev, [jobId]: data.reply }));
+    } catch {
+      setSummaries(prev => ({ ...prev, [jobId]: 'Failed to generate summary.' }));
+    } finally { setSummarizing(null); }
+  };
+
   const applyToJob = async (jobId: string) => {
     const detail = jobDetails[jobId];
     if (!detail) { await loadJobDetail(jobId); return; }
@@ -186,55 +212,66 @@ export default function LinkedInPage() {
         addChat('system', '**AUTO MODE STOPPED** by user.');
         break;
       }
-      // Load detail if needed
-      if (!jobDetails[job.job_id]) {
+
+      // Load detail if not already loaded
+      let detail = jobDetails[job.job_id];
+      if (!detail) {
         setLoadingDetail(job.job_id);
         try {
           const { data } = await api.get(`/linkedin/job/${job.job_id}`);
           setJobDetails(prev => ({ ...prev, [job.job_id]: data }));
-
-          if (!data.is_easy_apply) {
-            const msg = `Skipped ${job.title} @ ${job.company} (not Easy Apply)`;
-            setAutoLog(prev => [...prev, msg]);
-            addChat('system', msg);
-            continue;
-          }
-
-          if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
-
-          // Generate cover letter
-          addChat('system', `Generating for **${job.title}** @ **${job.company}**...`);
-          try {
-            await api.post('/ai/generate', {
-              jobTitle: data.title,
-              company: data.company,
-              jobUrl: `https://www.linkedin.com/jobs/view/${job.job_id}`,
-              jobDescription: data.description,
-              generateType: 'cover_letter',
-            });
-          } catch {}
-
-          if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
-
-          // Easy Apply
-          addChat('system', `Applying to **${job.title}**...`);
-          try {
-            const applyRes = await api.post(`/linkedin/apply/${job.job_id}`, { answers: {} });
-            const msg = applyRes.data.ok
-              ? `Applied: ${job.title} @ ${job.company}`
-              : `Failed: ${job.title} — ${applyRes.data.error}`;
-            setAutoLog(prev => [...prev, msg]);
-            addChat('system', msg);
-          } catch (err: any) {
-            const msg = `Error: ${job.title} — ${err.response?.data?.error || 'Unknown'}`;
-            setAutoLog(prev => [...prev, msg]);
-            addChat('system', msg);
-          }
-        } catch {
-          setAutoLog(prev => [...prev, `Failed to load: ${job.title}`]);
+          detail = data;
+        } catch (err: any) {
+          const msg = `Failed to load: ${job.title} — ${err.response?.data?.error || err.message || 'Unknown'}`;
+          setAutoLog(prev => [...prev, msg]);
+          addChat('system', msg);
+          setLoadingDetail(null);
+          continue;
         } finally {
           setLoadingDetail(null);
         }
+      }
+
+      if (!detail.is_easy_apply) {
+        const msg = `Skipped ${job.title} @ ${job.company} (not Easy Apply)`;
+        setAutoLog(prev => [...prev, msg]);
+        addChat('system', msg);
+        continue;
+      }
+
+      if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
+
+      // Generate cover letter
+      addChat('system', `Generating for **${job.title}** @ **${job.company}**...`);
+      try {
+        await api.post('/ai/generate', {
+          jobTitle: detail.title,
+          company: detail.company,
+          jobUrl: `https://www.linkedin.com/jobs/view/${job.job_id}`,
+          jobDescription: detail.description,
+          generateType: 'cover_letter',
+        });
+      } catch (err: any) {
+        const msg = `Generation warning: ${job.title} — ${err.response?.data?.error || err.message || 'Unknown'} (continuing...)`;
+        setAutoLog(prev => [...prev, msg]);
+        addChat('system', msg);
+      }
+
+      if (autoStopRef.current) { addChat('system', '**AUTO MODE STOPPED** by user.'); break; }
+
+      // Easy Apply
+      addChat('system', `Applying to **${job.title}**...`);
+      try {
+        const applyRes = await api.post(`/linkedin/apply/${job.job_id}`, { answers: {} });
+        const msg = applyRes.data.ok
+          ? `Applied: ${job.title} @ ${job.company}`
+          : `Failed: ${job.title} — ${applyRes.data.error}`;
+        setAutoLog(prev => [...prev, msg]);
+        addChat('system', msg);
+      } catch (err: any) {
+        const msg = `Apply error: ${job.title} — ${err.response?.data?.error || err.message || 'Unknown'}`;
+        setAutoLog(prev => [...prev, msg]);
+        addChat('system', msg);
       }
     }
 
@@ -409,13 +446,16 @@ export default function LinkedInPage() {
                   style={{ animationDelay: `${i*30}ms` }}>
                   <div className="flex items-center justify-between p-3" onClick={() => loadJobDetail(job.job_id)}>
                     <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <h3 className="font-medium text-sm text-zinc-100 truncate">{job.title}</h3>
                         {detail?.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-emerald-500/10 text-emerald-400 rounded border border-emerald-500/20 shrink-0">Easy Apply</span>}
+                        {detail && !detail.is_easy_apply && <span className="text-[9px] px-1.5 py-0.5 bg-blue-500/10 text-blue-400 rounded border border-blue-500/20 shrink-0">External</span>}
+                        {detail?.employment_type && <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800/50 text-zinc-400 rounded border border-zinc-700/30 shrink-0">{detail.employment_type}</span>}
+                        {detail?.experience_level && <span className="text-[9px] px-1.5 py-0.5 bg-zinc-800/50 text-zinc-400 rounded border border-zinc-700/30 shrink-0">{detail.experience_level}</span>}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5 text-[11px] text-zinc-500">
-                        <span>{job.company || '?'}</span>
-                        <span className="flex items-center gap-0.5"><MapPin size={9} />{job.location}</span>
+                        <span className="font-medium text-zinc-400">{job.company || 'Unknown'}</span>
+                        <span className="flex items-center gap-0.5"><MapPin size={9} />{job.location || 'N/A'}</span>
                         {job.listed_at && <span>{timeAgo(job.listed_at)}</span>}
                         {job.work_remote_allowed && <span className="text-emerald-400/70">Remote</span>}
                       </div>
@@ -450,7 +490,7 @@ export default function LinkedInPage() {
                         <div className="py-6 text-center"><Loader2 size={16} className="animate-spin mx-auto text-indigo-400" /></div>
                       ) : detail ? (
                         <div className="space-y-3">
-                          <div className="flex gap-1.5 flex-wrap">
+                          <div className="flex gap-1.5 flex-wrap items-center">
                             <a href={`https://www.linkedin.com/jobs/view/${job.job_id}`} target="_blank" rel="noreferrer"
                               className="flex items-center gap-1 text-[10px] bg-zinc-800/50 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-700/30 hover:border-zinc-600/50 transition-colors">
                               <ExternalLink size={10} /> LinkedIn
@@ -458,10 +498,26 @@ export default function LinkedInPage() {
                             {detail.apply_url && (
                               <a href={detail.apply_url} target="_blank" rel="noreferrer"
                                 className="flex items-center gap-1 text-[10px] bg-zinc-800/50 text-zinc-400 px-2 py-1 rounded-lg border border-zinc-700/30 hover:border-zinc-600/50 transition-colors">
-                                <ExternalLink size={10} /> Company
+                                <ExternalLink size={10} /> Apply on Website
                               </a>
                             )}
+                            <button onClick={(e) => { e.stopPropagation(); toggleSummary(job.job_id); }}
+                              className={`flex items-center gap-1 text-[10px] px-2 py-1 rounded-lg border transition-all ml-auto ${
+                                showSummary[job.job_id]
+                                  ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                                  : 'bg-zinc-800/50 text-zinc-400 border-zinc-700/30 hover:border-indigo-500/30 hover:text-indigo-400'
+                              }`}>
+                              {summarizing === job.job_id ? <Loader2 size={10} className="animate-spin" /> : <Sparkles size={10} />}
+                              AI Summary
+                            </button>
                           </div>
+                          {showSummary[job.job_id] && (
+                            <div className="bg-indigo-500/5 border border-indigo-500/20 rounded-xl p-3 text-xs text-zinc-300 whitespace-pre-wrap leading-relaxed animate-fade-in">
+                              {summarizing === job.job_id ? (
+                                <div className="flex items-center gap-2 text-indigo-400"><Loader2 size={12} className="animate-spin" /> Summarizing with AI...</div>
+                              ) : summaries[job.job_id] || 'No summary available'}
+                            </div>
+                          )}
                           <div className="bg-zinc-950/50 border border-zinc-800/50 rounded-xl p-3 text-xs text-zinc-400 whitespace-pre-wrap max-h-[250px] overflow-y-auto leading-relaxed">
                             {detail.description || 'No description'}
                           </div>
