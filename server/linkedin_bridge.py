@@ -13,6 +13,9 @@ import time
 COOKIE_DIR = os.path.join(os.path.dirname(__file__), ".linkedin_sessions")
 os.makedirs(COOKIE_DIR, exist_ok=True)
 
+class _AlreadyApplied(Exception):
+    pass
+
 EMPLOYMENT_TYPE_MAP = {
     "FULL_TIME": "Full-time",
     "PART_TIME": "Part-time",
@@ -92,7 +95,11 @@ def get_api(user_id: str):
 
 
 def easy_apply(user_id: str, job_id: str, answers: dict = None):
-    """Use Playwright to click Easy Apply on a LinkedIn job."""
+    """Use Playwright to Easy Apply on a LinkedIn job.
+
+    Approach: Navigate directly to /jobs/view/{job_id}/apply/ which opens the
+    apply modal immediately. Then handle multi-step forms (Submit, Next, Review).
+    """
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -108,15 +115,10 @@ def easy_apply(user_id: str, job_id: str, answers: dict = None):
     except Exception as e:
         return {"ok": False, "error": f"Failed to load session: {str(e)}"}
 
-    # Convert requests cookies to playwright format
-    pw_cookies = []
-    for cookie in cookies_jar:
-        pw_cookies.append({
-            'name': cookie.name,
-            'value': cookie.value,
-            'domain': cookie.domain,
-            'path': cookie.path or '/',
-        })
+    pw_cookies = [
+        {'name': c.name, 'value': c.value, 'domain': c.domain, 'path': c.path or '/'}
+        for c in cookies_jar
+    ]
 
     try:
         with sync_playwright() as p:
@@ -132,76 +134,106 @@ def easy_apply(user_id: str, job_id: str, answers: dict = None):
             context.add_cookies(pw_cookies)
 
             page = context.new_page()
-            job_url = f'https://www.linkedin.com/jobs/view/{job_id}/'
-            page.goto(job_url, wait_until='domcontentloaded')
-            page.wait_for_timeout(3000)
-
-            result = {"ok": False, "error": "Could not find Easy Apply button", "steps": []}
+            steps = []
+            result = {"ok": False, "error": "Unknown", "steps": steps}
 
             try:
-                # Look for Easy Apply button
-                easy_apply_btn = page.locator('button.jobs-apply-button, button[aria-label*="Easy Apply"]').first
-                if easy_apply_btn.is_visible(timeout=5000):
-                    result["steps"].append("Found Easy Apply button")
-                    easy_apply_btn.click()
-                    page.wait_for_timeout(2000)
+                # Navigate directly to apply URL — opens modal immediately
+                apply_url = f'https://www.linkedin.com/jobs/view/{job_id}/apply/'
+                page.goto(apply_url, wait_until='domcontentloaded')
+                page.wait_for_timeout(4000)
+                steps.append("Opened apply page")
 
-                    # Handle multi-step application
-                    max_steps = 10
-                    for step in range(max_steps):
-                        page.wait_for_timeout(1500)
+                # Check if already applied
+                already = page.locator('text=Application submitted, text=Submitted resume').first
+                try:
+                    if already.is_visible(timeout=2000):
+                        result = {"ok": True, "message": "Already applied to this job", "steps": steps}
+                        steps.append("Already applied")
+                        raise _AlreadyApplied()
+                except _AlreadyApplied:
+                    raise
+                except:
+                    pass
 
-                        # Check for submit button
-                        submit_btn = page.locator('button[aria-label="Submit application"], button:has-text("Submit application")').first
-                        if submit_btn.is_visible(timeout=2000):
-                            submit_btn.click()
-                            page.wait_for_timeout(2000)
-                            result = {"ok": True, "message": "Application submitted!", "steps": result["steps"]}
-                            result["steps"].append("Submitted application")
+                # Multi-step form loop (max 10 steps)
+                for step in range(10):
+                    page.wait_for_timeout(1500)
+
+                    # Check for submit button first (final step)
+                    submit = page.locator('button[aria-label="Submit application"]').first
+                    try:
+                        if submit.is_visible(timeout=2000):
+                            submit.click()
+                            steps.append("Clicked Submit")
+                            page.wait_for_timeout(3000)
+
+                            # Verify success — check for "Application submitted" on page
+                            submitted = page.locator('text=Application submitted').first
+                            try:
+                                if submitted.is_visible(timeout=5000):
+                                    result = {"ok": True, "message": "Application submitted!", "steps": steps}
+                                    break
+                            except:
+                                pass
+                            # Also check if modal closed (submit succeeded)
+                            modal = page.locator('[role="dialog"]').first
+                            try:
+                                if not modal.is_visible(timeout=2000):
+                                    result = {"ok": True, "message": "Application submitted (modal closed)", "steps": steps}
+                                    break
+                            except:
+                                pass
+                            result = {"ok": True, "message": "Submit clicked", "steps": steps}
                             break
+                    except:
+                        pass
 
-                        # Check for review button
-                        review_btn = page.locator('button[aria-label="Review your application"], button:has-text("Review")').first
-                        if review_btn.is_visible(timeout=1000):
-                            review_btn.click()
-                            result["steps"].append("Clicked Review")
+                    # Check for review button
+                    review = page.locator('button[aria-label="Review your application"], button:has-text("Review")').first
+                    try:
+                        if review.is_visible(timeout=1000):
+                            review.click()
+                            steps.append("Clicked Review")
                             continue
+                    except:
+                        pass
 
-                        # Check for next button
-                        next_btn = page.locator('button[aria-label="Continue to next step"], button:has-text("Next")').first
+                    # Check for next button
+                    next_btn = page.locator('button[aria-label="Continue to next step"], button:has-text("Next")').first
+                    try:
                         if next_btn.is_visible(timeout=1000):
+                            # Before clicking Next, try to fill form fields
+                            if answers:
+                                _fill_form_fields(page, answers, steps)
                             next_btn.click()
-                            result["steps"].append(f"Clicked Next (step {step+1})")
+                            steps.append(f"Clicked Next (step {step+1})")
                             continue
+                    except:
+                        pass
 
-                        # If we're stuck, check for dismiss/close
-                        result["steps"].append(f"Step {step+1}: Waiting for form...")
+                    # Try to fill form fields on current step
+                    if answers:
+                        _fill_form_fields(page, answers, steps)
 
-                        # Try to fill any visible text inputs with AI answers
-                        if answers:
-                            text_inputs = page.locator('input[type="text"]:visible, textarea:visible').all()
-                            for inp in text_inputs:
-                                label_text = ""
-                                try:
-                                    label_id = inp.get_attribute('id')
-                                    if label_id:
-                                        label_el = page.locator(f'label[for="{label_id}"]')
-                                        if label_el.count() > 0:
-                                            label_text = label_el.first.inner_text()
-                                except:
-                                    pass
-                                if label_text and label_text in answers:
-                                    inp.fill(answers[label_text])
-                                    result["steps"].append(f"Filled: {label_text}")
+                    # If no navigation buttons found, we might be stuck
+                    steps.append(f"Step {step+1}: no action button found")
+
+                    # Check if we're no longer on the apply page (maybe redirected)
+                    if '/apply' not in page.url and 'Application submitted' not in (page.content() or ''):
+                        result["error"] = "Redirected away from apply page"
+                        break
+
                 else:
-                    # Not an Easy Apply job
-                    result["error"] = "This job doesn't support Easy Apply. It redirects to the company's website."
+                    result["error"] = "Reached max steps without submitting"
 
+            except _AlreadyApplied:
+                pass  # result already set
             except Exception as e:
                 result["error"] = str(e)
-                result["steps"].append(f"Error: {str(e)}")
+                steps.append(f"Error: {str(e)}")
 
-            # Take a screenshot for debugging
+            # Take screenshot for debugging
             try:
                 screenshot_path = os.path.join(COOKIE_DIR, f"apply_{job_id}.png")
                 page.screenshot(path=screenshot_path)
@@ -218,6 +250,30 @@ def easy_apply(user_id: str, job_id: str, answers: dict = None):
 
     except Exception as e:
         return {"ok": False, "error": f"Playwright error: {str(e)}"}
+
+
+def _fill_form_fields(page, answers: dict, steps: list):
+    """Try to fill visible form fields with provided answers."""
+    try:
+        text_inputs = page.locator('input[type="text"]:visible, textarea:visible').all()
+        for inp in text_inputs:
+            try:
+                label_text = ""
+                label_id = inp.get_attribute('id')
+                if label_id:
+                    label_el = page.locator(f'label[for="{label_id}"]')
+                    if label_el.count() > 0:
+                        label_text = label_el.first.inner_text().strip()
+                if not label_text:
+                    # Try aria-label
+                    label_text = inp.get_attribute('aria-label') or ''
+                if label_text and label_text in answers:
+                    inp.fill(answers[label_text])
+                    steps.append(f"Filled: {label_text}")
+            except:
+                pass
+    except:
+        pass
 
 
 def main():
