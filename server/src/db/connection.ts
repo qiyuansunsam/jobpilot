@@ -11,7 +11,10 @@ export function migrate() {
   // Create migration tracking table
   db.exec('CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, ran_at TEXT DEFAULT (datetime(\'now\')))');
 
-  const migrationsDir = path.resolve(__dirname, 'migrations');
+  // tsc does not copy .sql files, so a production build falls back to the source tree
+  const candidates = [path.resolve(__dirname, 'migrations'), path.resolve(__dirname, '../../src/db/migrations')];
+  const migrationsDir = candidates.find(d => fs.existsSync(d));
+  if (!migrationsDir) throw new Error('migrations directory not found');
   const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
   let ran = 0;
   for (const file of files) {

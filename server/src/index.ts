@@ -21,6 +21,8 @@ const app = express();
 app.use(cors({ origin: [
   'http://localhost:5173',
   /\.ngrok-free\.app$/,
+  /\.trycloudflare\.com$/,
+  ...(process.env.PUBLIC_ORIGIN ? [process.env.PUBLIC_ORIGIN] : []),
 ] }));
 app.use(express.json({ limit: '10mb' }));
 

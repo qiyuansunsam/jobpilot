@@ -72,6 +72,32 @@ Per-person setup: each person runs their own copy of the repo on their own machi
 
 The MCP server needs no Anthropic key. Only `generate_application` and `summarize_cv` call Claude with the server's credentials; a CLI agent can skip them, read the CV with `get_profile`, write the cover letter itself and store it with `save_application`.
 
+## Deploying with Cloudflare
+
+JobPilot cannot run on Cloudflare Workers or Pages as a whole: the API uses SQLite on disk and spawns Python with Playwright and a headless Chromium for LinkedIn. What works is a **Cloudflare Tunnel**: the server keeps running on a laptop or small box and Cloudflare gives it a public HTTPS URL, with no ports opened. This replaces the ngrok setup.
+
+One-off, random `*.trycloudflare.com` URL:
+
+```bash
+brew install cloudflared        # or the cloudflared package for your OS
+npm run build                   # builds client and server
+npm start                       # serves API and client on :3001
+npm run tunnel                  # prints the public URL
+```
+
+Permanent URL on your own domain (DNS on Cloudflare):
+
+```bash
+cloudflared tunnel login
+cloudflared tunnel create jobpilot
+cloudflared tunnel route dns jobpilot jobpilot.yourdomain.com
+cloudflared tunnel run --url http://localhost:3001 jobpilot
+```
+
+Set `PUBLIC_ORIGIN=https://jobpilot.yourdomain.com` in `.env`, and `cloudflared service install` keeps the tunnel up after reboots.
+
+Before exposing it, set a real `JWT_SECRET` and `ENCRYPTION_KEY` in `.env`; the defaults are development placeholders. Anyone with the URL can register an account, so consider putting Cloudflare Access (free for small teams) in front of the hostname.
+
 ## Layout
 
 - `client/` Vite + React. Console lives in `src/components/console/`.
