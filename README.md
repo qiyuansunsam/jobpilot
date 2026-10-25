@@ -24,7 +24,7 @@ Claude credentials: `ANTHROPIC_API_KEY` in `.env`, or an `ant auth login` profil
 
 The chat panel (right side of the LinkedIn page, floating button elsewhere) is an agent with tools over the whole app. It keeps conversation history and the UI reacts to what it does (a search from the console fills the job list).
 
-Tools: `get_profile`, `update_additional_info`, `summarize_cv`, `get_preferences`, `update_preferences`, `list_applications`, `get_application`, `update_application_status`, `update_application_content`, `linkedin_status`, `search_jobs`, `get_job`, `generate_application`, `easy_apply`.
+Tools: `get_profile`, `update_additional_info`, `summarize_cv`, `get_preferences`, `update_preferences`, `list_applications`, `get_application`, `update_application_status`, `update_application_content`, `linkedin_status`, `search_jobs`, `get_job`, `generate_application`, `save_application`, `easy_apply`.
 
 `easy_apply` acts on your real LinkedIn account. The system prompt only allows it when you explicitly ask to apply.
 
@@ -59,7 +59,18 @@ Claude Desktop (`claude_desktop_config.json`):
 }
 ```
 
-The MCP server itself needs no Anthropic key; only `generate_application` and `summarize_cv` call Claude and use the server's credentials.
+Codex CLI (`~/.codex/config.toml`):
+
+```toml
+[mcp_servers.jobpilot]
+command = "npm"
+args = ["--prefix", "/path/to/jobpilot/server", "run", "-s", "mcp"]
+env = { JOBPILOT_USER = "yourname" }
+```
+
+Per-person setup: each person runs their own copy of the repo on their own machine. Register once in the web app (that creates the user and the local SQLite database), connect LinkedIn on the LinkedIn page once (that stores the session the bridge reuses), then point the agent at the MCP server with `JOBPILOT_USER` set to that username.
+
+The MCP server needs no Anthropic key. Only `generate_application` and `summarize_cv` call Claude with the server's credentials; a CLI agent can skip them, read the CV with `get_profile`, write the cover letter itself and store it with `save_application`.
 
 ## Layout
 

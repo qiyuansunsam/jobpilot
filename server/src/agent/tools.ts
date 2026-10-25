@@ -224,6 +224,26 @@ export const tools: ConsoleTool<any>[] = [
   }),
 
   define({
+    name: 'save_application',
+    description: 'Save an application you wrote yourself (cover letter and/or screening answers) without calling Claude. Use this when you are the model doing the tailoring, e.g. from an MCP client. Returns the new application id.',
+    schema: z.object({
+      job_title: z.string(),
+      company: z.string().optional(),
+      job_url: z.string().optional(),
+      job_description: z.string().min(10),
+      cover_letter: z.string().optional(),
+      screening_answers: z.string().optional(),
+    }),
+    run: async ({ userId }, input) => {
+      const app = createApplication(userId, {
+        job_title: input.job_title, company: input.company, job_url: input.job_url, job_description: input.job_description,
+        generated_cover: input.cover_letter, generated_answers: input.screening_answers,
+      });
+      return { result: { application_id: app.id }, summary: `Saved application #${app.id} for ${input.job_title}${input.company ? ` @ ${input.company}` : ''}`, data: { application: app } };
+    },
+  }),
+
+  define({
     name: 'easy_apply',
     description: 'Submit a LinkedIn Easy Apply for a job. Irreversible: only call when the user has clearly asked to apply. Optional answers map question text to answer.',
     schema: z.object({ job_id: z.string(), answers: z.record(z.string(), z.string()).optional() }),
