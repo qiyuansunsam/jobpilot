@@ -1,7 +1,5 @@
-import { config } from '../config';
+import { askClaude } from './claude.service';
 import { GenerateRequest } from '../types';
-
-const PROXY_BASE = config.claudeProxyUrl; // http://127.0.0.1:3456
 
 const SYSTEM_PROMPT = `You are JobPilot AI — a professional job application assistant. Your goal is to generate tailored, authentic, and compelling application content.
 
@@ -18,26 +16,6 @@ Output Format:
 - If generating screening answers, output them under a "## Screening Answers" heading with each Q&A pair
 - Use markdown formatting`;
 
-async function chatCompletion(messages: Array<{ role: string; content: string }>): Promise<string> {
-  const res = await fetch(`${PROXY_BASE}/v1/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model: 'claude-sonnet-4',
-      messages,
-      max_tokens: 4096,
-    }),
-  });
-
-  if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Claude proxy error (${res.status}): ${err}`);
-  }
-
-  const data: any = await res.json();
-  return data.choices?.[0]?.message?.content || '';
-}
-
 export async function generateContent(
   cvText: string,
   additionalInfo: string,
@@ -46,10 +24,7 @@ export async function generateContent(
 ): Promise<{ coverLetter: string | null; screeningAnswers: string | null; rawResponse: string }> {
   const userPrompt = buildUserPrompt(cvText, additionalInfo, preferences, request);
 
-  const rawResponse = await chatCompletion([
-    { role: 'system', content: SYSTEM_PROMPT },
-    { role: 'user', content: userPrompt },
-  ]);
+  const rawResponse = await askClaude(SYSTEM_PROMPT, userPrompt);
 
   let coverLetter: string | null = null;
   let screeningAnswers: string | null = null;

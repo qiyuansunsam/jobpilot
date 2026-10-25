@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authMiddleware } from '../middleware/auth';
-import { config } from '../config';
+import { askClaude } from '../services/claude.service';
 import { getProfile } from '../services/profile.service';
 import { getPreferences } from '../services/preferences.service';
 
@@ -33,25 +33,7 @@ You can help with:
 
 Be concise and actionable. Output improved text directly when asked to edit.`;
 
-    const response = await fetch(`${config.claudeProxyUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4',
-        messages: [
-          { role: 'system', content: systemPrompt },
-          { role: 'user', content: message },
-        ],
-        max_tokens: 4096,
-      }),
-    });
-
-    if (!response.ok) {
-      throw new Error(`Claude proxy error: ${response.status}`);
-    }
-
-    const data: any = await response.json();
-    const reply = data.choices?.[0]?.message?.content || 'No response';
+    const reply = await askClaude(systemPrompt, message);
     res.json({ reply });
   } catch (err: any) {
     res.status(500).json({ error: err.message });

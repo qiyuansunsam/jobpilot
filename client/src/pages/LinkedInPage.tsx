@@ -326,8 +326,8 @@ export default function LinkedInPage() {
     try {
       const { data } = await api.post('/chat', { message: msg, context });
       addChat('assistant', data.reply);
-    } catch {
-      addChat('system', 'Chat error — is Claude proxy running?');
+    } catch (err: any) {
+      addChat('system', `Chat error: ${err.response?.data?.error || err.message}`);
     } finally { setChatLoading(false); }
   };
 

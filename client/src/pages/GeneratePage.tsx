@@ -40,7 +40,7 @@ export default function GeneratePage() {
       });
       setResult(data.generated);
     } catch (err: any) {
-      setError(err.response?.data?.error || 'Generation failed. Check your Claude proxy.');
+      setError(err.response?.data?.error || 'Generation failed. Check ANTHROPIC_API_KEY on the server.');
     } finally {
       setLoading(false);
     }

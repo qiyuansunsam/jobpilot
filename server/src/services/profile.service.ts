@@ -1,7 +1,7 @@
 import fs from 'fs';
 import db from '../db/connection';
 import { Profile } from '../types';
-import { config } from '../config';
+import { askClaude } from './claude.service';
 
 export function getProfile(userId: number): Profile | null {
   return db.prepare('SELECT * FROM profiles WHERE user_id = ?').get(userId) as Profile | null;
@@ -59,30 +59,7 @@ If a section has no data, use an empty array []. Keep skills to top 10-12. Keep 
 CV TEXT:
 ${profile.cv_text.slice(0, 6000)}`;
 
-  let res: Response;
-  try {
-    res = await fetch(`${config.claudeProxyUrl}/v1/chat/completions`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: 'claude-sonnet-4',
-        messages: [
-          { role: 'system', content: 'You are a CV parser. Return only valid JSON, no markdown.' },
-          { role: 'user', content: prompt },
-        ],
-        max_tokens: 2048,
-      }),
-    });
-  } catch (e: any) {
-    throw new Error(`Claude proxy unreachable: ${e.message}`);
-  }
-
-  if (!res.ok) {
-    throw new Error(`Claude proxy error: ${res.status}`);
-  }
-
-  const data: any = await res.json();
-  const text = data.choices?.[0]?.message?.content || '';
+  const text = await askClaude('You are a CV parser. Return only valid JSON, no markdown.', prompt, 4096);
 
   // Extract JSON from response (handle potential markdown fences)
   let jsonStr = text.trim();
