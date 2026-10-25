@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react';
 import api from '../api/client';
+import { useConsole } from '../components/console/ConsoleContext';
+import AssistantConsole from '../components/console/AssistantConsole';
 import { Search, Briefcase, MapPin, Clock, Sparkles, Wifi, WifiOff, LogIn, LogOut, ChevronDown, ChevronUp, ExternalLink, Zap, Globe, Send, Bot, User, Rocket, CheckCircle, XCircle, Loader2, ToggleLeft, ToggleRight, Play, Square, FileText } from 'lucide-react';
 
 interface LinkedInSession { authenticated: boolean; name?: string; headline?: string; }
 interface Job { job_id: string; title: string; company: string; location: string; listed_at: number; work_remote_allowed: boolean; is_easy_apply: boolean; apply_url: string; workplace: string; description: string; }
 interface JobDetail { job_id: string; title: string; description: string; company: string; location: string; apply_url: string; is_easy_apply: boolean; workplace: string; work_remote_allowed: boolean; listed_at: number; }
-interface ChatMessage { role: 'user' | 'assistant' | 'system'; content: string; timestamp: number; }
 
 export default function LinkedInPage() {
   const [session, setSession] = useState<LinkedInSession>({ authenticated: false });
@@ -36,13 +37,8 @@ export default function LinkedInPage() {
   const [autoLimit, setAutoLimit] = useState(5);
   const [autoApplied, setAutoApplied] = useState(0);
 
-  // Chat
-  const [chatMessages, setChatMessages] = useState<ChatMessage[]>([
-    { role: 'system', content: 'Hi! I\'m your JobPilot AI. Search for jobs, select one, and I\'ll help you apply. Use **Auto Mode** for one-click applications or **Advanced Mode** to review each one.', timestamp: Date.now() }
-  ]);
-  const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
-  const chatEndRef = useRef<HTMLDivElement>(null);
+  // Admin console (shared, see components/console)
+  const { addLocal, onEvent, setContextProvider } = useConsole();
 
   // Apply state
   const [applying, setApplying] = useState<string | null>(null);
@@ -64,12 +60,35 @@ export default function LinkedInPage() {
     }).catch(() => setCheckingSession(false));
   }, []);
 
-  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [chatMessages]);
   useEffect(() => { autoLimitRef.current = autoLimit; }, [autoLimit]);
 
-  const addChat = (role: ChatMessage['role'], content: string) => {
-    setChatMessages(prev => [...prev, { role, content, timestamp: Date.now() }]);
-  };
+  const addChat = (role: 'system' | 'assistant', content: string) => addLocal(role, content);
+
+  // Let console tool calls drive this page
+  useEffect(() => onEvent((e) => {
+    if (e.tool === 'search_jobs' && Array.isArray(e.data?.jobs)) {
+      const list: Job[] = e.data.jobs;
+      setJobs(list);
+      const d: Record<string, JobDetail> = {};
+      for (const j of list) d[j.job_id] = j as unknown as JobDetail;
+      setJobDetails(prev => ({ ...prev, ...d }));
+      setSelectedJob(null);
+    }
+    if (e.tool === 'get_job' && e.data?.job?.job_id) {
+      setJobDetails(prev => ({ ...prev, [e.data.job.job_id]: e.data.job }));
+    }
+  }), [onEvent]);
+
+  // Tell the console what the user is looking at
+  useEffect(() => {
+    setContextProvider(() => {
+      const d = selectedJob ? jobDetails[selectedJob] : null;
+      const parts = [`Page: LinkedIn jobs. Mode: ${mode}. ${jobs.length} jobs listed.`];
+      if (d) parts.push(`Selected job: ${d.title} @ ${d.company} (job_id ${d.job_id})\n${d.description?.slice(0, 2000) || ''}`);
+      return parts.join('\n');
+    });
+    return () => setContextProvider(null);
+  }, [selectedJob, jobDetails, jobs.length, mode, setContextProvider]);
 
 
   const handleLogin = async () => {
@@ -307,28 +326,6 @@ export default function LinkedInPage() {
       addChat('system', `**AUTO MODE COMPLETE.** Reached limit: **${appliedCount}/${autoLimitRef.current}** applied. Check Dashboard.`);
     }
     setAutoRunning(false);
-  };
-
-  const sendChat = async () => {
-    if (!chatInput.trim() || chatLoading) return;
-    const msg = chatInput.trim();
-    setChatInput('');
-    addChat('user', msg);
-    setChatLoading(true);
-
-    // Build context from selected job
-    let context = '';
-    if (selectedJob && jobDetails[selectedJob]) {
-      const d = jobDetails[selectedJob];
-      context = `Selected job: ${d.title} at ${d.company}\nLocation: ${d.location}\nDescription: ${d.description?.slice(0, 2000)}`;
-    }
-
-    try {
-      const { data } = await api.post('/chat', { message: msg, context });
-      addChat('assistant', data.reply);
-    } catch (err: any) {
-      addChat('system', `Chat error: ${err.response?.data?.error || err.message}`);
-    } finally { setChatLoading(false); }
   };
 
   const timeAgo = (ts: number) => {
@@ -581,56 +578,8 @@ export default function LinkedInPage() {
         </div>
       </div>
 
-      {/* Right: Chat panel */}
-      <div className="w-[380px] flex flex-col glass border-l border-zinc-800/50 py-8 pr-8 pl-4 shrink-0">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold flex items-center gap-2">
-            <Bot size={14} className="text-indigo-400" /> AI Assistant
-          </h2>
-          <span className={`text-[9px] px-2 py-0.5 rounded-full border ${mode === 'auto' ? 'bg-amber-500/10 border-amber-500/20 text-amber-400' : 'bg-indigo-500/10 border-indigo-500/20 text-indigo-400'}`}>
-            {mode === 'auto' ? 'Auto' : 'Advanced'}
-          </span>
-        </div>
-
-        {/* Messages */}
-        <div className="flex-1 overflow-y-auto space-y-3 mb-3 pr-1">
-          {chatMessages.map((msg, i) => (
-            <div key={i} className={`animate-fade-in ${msg.role === 'user' ? 'flex justify-end' : ''}`}>
-              {msg.role === 'system' ? (
-                <div className="text-[11px] text-zinc-500 bg-zinc-900/50 px-3 py-2 rounded-xl border border-zinc-800/30 leading-relaxed">
-                  <span dangerouslySetInnerHTML={{ __html: msg.content.replace(/\*\*(.*?)\*\*/g, '<strong class="text-zinc-300">$1</strong>') }} />
-                </div>
-              ) : msg.role === 'user' ? (
-                <div className="max-w-[85%] text-xs bg-indigo-500/10 text-indigo-200 px-3 py-2 rounded-xl border border-indigo-500/20">
-                  {msg.content}
-                </div>
-              ) : (
-                <div className="text-xs text-zinc-300 bg-zinc-800/30 px-3 py-2 rounded-xl border border-zinc-700/20 leading-relaxed whitespace-pre-wrap">
-                  {msg.content}
-                </div>
-              )}
-            </div>
-          ))}
-          {chatLoading && (
-            <div className="flex gap-1 px-3 py-2">
-              {[0,1,2].map(i => <div key={i} className="w-1.5 h-1.5 rounded-full bg-indigo-500 animate-pulse" style={{ animationDelay: `${i*150}ms` }} />)}
-            </div>
-          )}
-          <div ref={chatEndRef} />
-        </div>
-
-        {/* Input */}
-        <div className="flex gap-2">
-          <input value={chatInput} onChange={e => setChatInput(e.target.value)}
-            onKeyDown={e => e.key === 'Enter' && sendChat()}
-            placeholder="Ask AI to edit, improve, or strategize..."
-            className="flex-1 bg-zinc-900/50 border border-zinc-800 rounded-xl px-3 py-2.5 text-xs text-zinc-100 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 transition-all placeholder:text-zinc-700" />
-          <button onClick={sendChat} disabled={chatLoading || !chatInput.trim()}
-            className="bg-gradient-to-r from-indigo-600 to-purple-600 text-white p-2.5 rounded-xl transition-all disabled:opacity-30 hover:shadow-[0_0_12px_rgba(99,102,241,0.3)]">
-            <Send size={14} />
-          </button>
-        </div>
-      </div>
+      {/* Right: Admin console */}
+      <AssistantConsole className="w-[380px] glass border-l border-zinc-800/50 py-8 pr-8 pl-4 shrink-0" />
     </div>
   );
 }

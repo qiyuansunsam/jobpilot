@@ -43,3 +43,12 @@ export function updateApplicationStatus(userId: number, appId: number, status: s
     UPDATE applications SET status = ?, applied_at = COALESCE(?, applied_at) WHERE id = ? AND user_id = ?
   `).run(status, appliedAt, appId, userId);
 }
+
+export function updateApplicationContent(userId: number, appId: number, data: { generated_cover?: string; generated_answers?: string }) {
+  db.prepare(`
+    UPDATE applications
+    SET generated_cover = COALESCE(?, generated_cover),
+        generated_answers = COALESCE(?, generated_answers)
+    WHERE id = ? AND user_id = ?
+  `).run(data.generated_cover ?? null, data.generated_answers ?? null, appId, userId);
+}
